@@ -50,15 +50,9 @@ The reTerminal runs two systemd service layers for managing the hydroponic opera
 
 ---
 
-## Repository Initialization
+## Key Features
 
-Initialize the repository and track active development files:
-
-```bash
-git init
-git add .
-git commit -m "initial commit: add dosing controller backend, React frontend, and HAL scripts"
-git remote add origin https://github.com/CyberShadowSensei/hydroagrix-ai-dosing-controller
-git branch -M main
-git push -u origin main
-```
+*   **Real-Time Telemetry:** Continuous monitoring of pH, Electrical Conductivity (EC), and environmental parameters.
+*   **Automated Dosing:** Intelligent, feedback-driven peristaltic pump control to maintain optimal nutrient levels.
+*   **Vision Integration:** Seamlessly interfaces with the edge vision pipeline to adjust dosing limits based on the plant's current growth stage.
+*   **Web Dashboard:** Responsive React-based frontend for remote monitoring, manual overrides, and system configuration.
