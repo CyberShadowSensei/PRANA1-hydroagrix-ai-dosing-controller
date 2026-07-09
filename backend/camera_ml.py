@@ -12,6 +12,7 @@ from models import PhotoRecord, PlantStageStatus, PlantPreset, SensorLimits
 PHOTO_DIRECTORY = "captured_photos"
 os.makedirs(PHOTO_DIRECTORY, exist_ok=True)
 MODEL_PATH = 'stage_detect_ncnn_model'
+CLS_MODEL_PATH = 'yolov8n-cls_ncnn_model'
 plant_monitor_running = False
 plant_monitor_lock = threading.Lock()
 
@@ -25,17 +26,27 @@ global_camera = None
 stream_running = False
 latest_frame = None
 camera_lock = threading.Lock()
-ml_model = None
+ml_model_det = None
+ml_model_cls = None
 
 def get_ml_model():
-    global ml_model
-    if ml_model is None and YOLO is not None and os.path.exists(MODEL_PATH):
-        try:
-            print(f"DEBUG: Loading YOLO model from {MODEL_PATH}...")
-            ml_model = YOLO(MODEL_PATH)
-        except Exception as e:
-            print(f"DEBUG: Failed to load YOLO model: {e}")
-    return ml_model
+    global ml_model_det, ml_model_cls
+    if YOLO is not None:
+        if ml_model_det is None and os.path.exists(MODEL_PATH):
+            try:
+                print(f"DEBUG: Loading YOLO detector from {MODEL_PATH}...")
+                ml_model_det = YOLO(MODEL_PATH, task='detect')
+            except Exception as e:
+                print(f"DEBUG: Failed to load YOLO detector: {e}")
+        
+        if ml_model_cls is None and os.path.exists(CLS_MODEL_PATH):
+            try:
+                print(f"DEBUG: Loading YOLO classifier from {CLS_MODEL_PATH}...")
+                ml_model_cls = YOLO(CLS_MODEL_PATH, task='classify')
+            except Exception as e:
+                print(f"DEBUG: Failed to load YOLO classifier: {e}")
+                
+    return ml_model_det, ml_model_cls
 
 def camera_worker():
     global global_camera, latest_frame, stream_running
@@ -91,17 +102,29 @@ def detect_plant_stage():
         db.session.add(PhotoRecord(filename=filename, google_drive_link=filepath))
         db.session.commit()
         
-        detected_stage = "Vegetative"
-        model = get_ml_model()
-        if model is not None:
-            results = model(frame, verbose=False)
+        detected_stage = "Vegetative" # Default
+        det_model, cls_model = get_ml_model()
+        
+        if det_model is not None and cls_model is not None:
+            # 1. Run Detector
+            results = det_model(frame, verbose=False)
             if results and len(results[0].boxes) > 0:
+                # 2. Crop Plant
                 best_idx = results[0].boxes.conf.argmax().item()
-                class_id = int(results[0].boxes.cls[best_idx].item())
-                detected_stage = results[0].names[class_id]
-                print(f"DEBUG: ML Engine detected: {detected_stage}")
+                box = results[0].boxes.xyxy[best_idx].cpu().numpy().astype(int)
+                x1, y1, x2, y2 = box
+                plant_crop = frame[y1:y2, x1:x2]
+                
+                # 3. Run Classifier
+                cls_results = cls_model(plant_crop, verbose=False)
+                top_idx = cls_results[0].probs.top1
+                detected_stage = cls_model.names[top_idx]
+                
+                print(f"DEBUG: ML Engine detected stage: {detected_stage}")
             else:
-                print("DEBUG: ML Engine detected no distinct stage (using default).")
+                print("DEBUG: ML Engine detected no plant in frame.")
+        else:
+            print("DEBUG: ML models not fully loaded.")
         
         with app.app_context():
             import json
