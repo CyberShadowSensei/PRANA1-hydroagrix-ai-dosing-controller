@@ -1,0 +1,14 @@
+[Unit]
+Description=Hydroponics Backend Service
+After=network.target
+
+[Service]
+User=raspberrypi
+WorkingDirectory=/home/raspberrypi/hydroagrix_reterminal_package/backend
+ExecStart=/usr/bin/python3 /home/raspberrypi/hydroagrix_reterminal_package/backend/main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

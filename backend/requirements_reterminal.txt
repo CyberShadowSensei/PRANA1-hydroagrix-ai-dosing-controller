@@ -1,0 +1,18 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+flask
+flask-socketio
+flask-sqlalchemy
+flask-cors
+pytz
+requests
+opencv-python
+numpy
+reportlab
+RPi.GPIO
+gpiozero
+seeed-python-dht
+grove.py
+ultralytics
+smbus2

@@ -1,0 +1,186 @@
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import socket from "../socket";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import { RefreshCw } from "lucide-react";
+
+const TDS = () => {
+  const [tdsData, setTdsData] = useState([]);
+  const [currentTDS, setCurrentTDS] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const maxDataPoints = 20; // Limit the number of points shown on graph
+
+  const fetchSingleTDSData = async () => {
+    setIsLoading(true);
+    try {
+      const response = await axios.get('/get_tds');
+      const data = response.data;
+      
+      // Update current TDS value
+      if (data && data.tds_value !== undefined) {
+        const tdsValue = parseFloat(data.tds_value);
+        setCurrentTDS(isNaN(tdsValue) ? 0 : tdsValue.toFixed(1));
+        // NOTE: We no longer push this single reading into the historical chart array.
+        // Pushing random live readings into 10-minute historical data causes irregular graph intervals.
+      }
+    } catch (error) {
+      console.error("Error fetching TDS data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchTDSHistoryData = async () => {
+      try {
+        const response = await axios.get('/get_tds_history');
+        const historyData = response.data;
+        const formattedData = historyData.tds_data.map(item => ({
+          time: item.date,
+          value: parseFloat(item.tds_value)
+        }));
+        
+        const recentData = formattedData.slice(-maxDataPoints);
+        setTdsData(recentData);
+      } catch (error) {
+        console.error("Error fetching historical TDS data:", error);
+      }
+    };
+
+    fetchTDSHistoryData();
+    const historyInterval = setInterval(fetchTDSHistoryData, 300000); // Chart updates every 5 mins
+
+    // Using singleton socket imported from ../socket
+    socket.on('telemetry_update', (data) => {
+      const now = new Date().toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      if (data.ec !== null && data.ec !== undefined) {
+        setCurrentTDS(parseFloat(data.ec).toFixed(1));
+        setTdsData(prev => {
+          if (prev.length === 0) return prev;
+          const withoutLive = prev.filter(p => !p.isLive);
+          return [...withoutLive, { time: now, tds_value: data.ec, isLive: true }];
+        });
+      }
+    });
+
+    return () => {
+      clearInterval(historyInterval);
+      socket.off('telemetry_update');
+    };
+  }, []);
+
+  // Glowing dot rendered only on the live (most recent injected) point
+  const LiveDot = (props) => {
+    const { cx, cy, payload } = props;
+    if (!payload?.isLive) return null;
+    return (
+      <circle cx={cx} cy={cy} r={7} fill="#10b981" stroke="#6ee7b7" strokeWidth={2}
+        style={{ filter: 'drop-shadow(0 0 8px #10b981)' }} />
+    );
+  };
+
+  return (
+    <div className="w-full min-h-screen bg-slate-950 p-4 sm:p-6 text-slate-200">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500 drop-shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              EC Conductivity
+            </h1>
+            <p className="text-slate-400 mt-2">Nutrient concentration monitoring (mS/cm)</p>
+          </div>
+          
+          <button 
+            onClick={fetchSingleTDSData}
+            disabled={isLoading}
+            className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 border border-emerald-500/30 hover:border-emerald-500 text-emerald-400 font-bold transition-all active:scale-95 disabled:opacity-50 group shadow-lg shadow-emerald-900/10"
+          >
+            <RefreshCw size={18} className={`${isLoading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`} />
+            <span>Update EC Reading</span>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="space-y-8">
+          {/* Current Reading */}
+          <div className="grid grid-cols-1 gap-6">
+            <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-8 shadow-xl border border-slate-800/50 transform hover:scale-[1.01] transition-all duration-300 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+              <div className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-emerald-400 mb-6">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                Nutrient Strength
+              </div>
+              <div className="flex items-baseline gap-4">
+                <span className="text-7xl font-black text-white tracking-tighter">
+                  {currentTDS}
+                </span>
+                <span className="text-2xl font-medium text-slate-500 uppercase tracking-widest">mS/cm</span>
+              </div>
+              <p className="text-slate-500 mt-6 text-sm max-w-md">
+                Electrical Conductivity (EC) measures the amount of dissolved salts (nutrients) in the water. Keep this within the plant's optimal range for maximum growth.
+              </p>
+            </div>
+          </div>
+
+          {/* Chart */}
+          <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-6 shadow-xl border border-slate-800/50">
+            <h3 className="text-lg font-semibold text-slate-100 mb-6 flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-slate-500"></div>
+              Nutrient Concentration History
+            </h3>
+            <div className="h-[350px] w-full bg-slate-950/30 rounded-lg p-4 border border-slate-800/30">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={tdsData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.1)" vertical={false} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#475569"
+                    tick={{ fill: '#64748b', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis 
+                    stroke="#475569"
+                    tick={{ fill: '#64748b', fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#0f172a',
+                      border: '1px solid rgba(148, 163, 184, 0.2)',
+                      borderRadius: '0.75rem',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                    }}
+                    labelStyle={{ color: '#94a3b8', marginBottom: '4px', fontWeight: 'bold' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="tds_value"
+                    stroke="#10b981"
+                    strokeWidth={4}
+                    dot={<LiveDot />}
+                    activeDot={{ r: 8, strokeWidth: 0 }}
+                    name="EC (ms/cm)"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TDS;

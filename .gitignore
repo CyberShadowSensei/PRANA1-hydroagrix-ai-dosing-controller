@@ -1,0 +1,34 @@
+# Node Modules & Web Build
+node_modules/
+dist/
+build/
+.svelte-kit/
+
+# Python Environment
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+env/
+.env
+
+# Model weights (large files)
+*.pt
+*.bin
+*.param
+!backend/stage_detect.pt
+
+# Log files and local configs
+*.log
+backend/captured_photos/*.jpg
+backend/captured_photos/*.mp4
+!backend/captured_photos/test_plant.jpg
+email_config.json
+system_config.json
+
+# IDEs
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

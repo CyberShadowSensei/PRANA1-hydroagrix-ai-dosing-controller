@@ -1,0 +1,58 @@
+{
+  "created_at": "2026-06-20T21:41:29",
+  "units": "pH",
+  "method": "three_point_piecewise_linear",
+  "ph_channel": 2,
+  "calibration_temperature_c": 29.4,
+  "points": [
+    {
+      "label": "Acidic_Buffer",
+      "reference_ph": 4.0,
+      "solution_temperature_c": 29.4,
+      "raw_average": 610.3,
+      "raw_minimum": 607,
+      "raw_maximum": 617,
+      "raw_span": 10,
+      "samples": 30
+    },
+    {
+      "label": "Neutral_Buffer",
+      "reference_ph": 7.0,
+      "solution_temperature_c": 29.4,
+      "raw_average": 424.6666666666667,
+      "raw_minimum": 423,
+      "raw_maximum": 427,
+      "raw_span": 4,
+      "samples": 30
+    },
+    {
+      "label": "Alkaline_Buffer",
+      "reference_ph": 10.01,
+      "solution_temperature_c": 29.4,
+      "raw_average": 318.8666666666667,
+      "raw_minimum": 316,
+      "raw_maximum": 321,
+      "raw_span": 5,
+      "samples": 30
+    }
+  ],
+  "segments": [
+    {
+      "region": "acidic",
+      "slope": -0.016160890644639977,
+      "offset": 13.862991560423778
+    },
+    {
+      "region": "alkaline",
+      "slope": -0.028449905482041585,
+      "offset": 19.081726528040328
+    }
+  ],
+  "low_segment_slope": -0.016160890644639977,
+  "low_segment_offset": 13.862991560423778,
+  "high_segment_slope": -0.028449905482041585,
+  "high_segment_offset": 19.081726528040328,
+  "neutral_raw": 424.6666666666667,
+  "neutral_ph": 7.0,
+  "notes": "Piecewise linear calibration anchored at neutral. Temperature during calibration is recorded to allow Nernst equation compensation during live monitoring."
+}

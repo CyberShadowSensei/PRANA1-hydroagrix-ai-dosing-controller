@@ -1,0 +1,15 @@
+[Unit]
+Description=Hydroponics Frontend Service
+After=network.target
+
+[Service]
+User=raspberrypi
+WorkingDirectory=/home/raspberrypi/hydroagrix_reterminal_package/frontend
+ExecStart=/usr/bin/npm run dev
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/bin:/usr/local/bin
+Environment=NODE_ENV=development
+
+[Install]
+WantedBy=multi-user.target
