@@ -11,7 +11,7 @@ from models import PhotoRecord, PlantStageStatus, PlantPreset, SensorLimits
 
 PHOTO_DIRECTORY = "captured_photos"
 os.makedirs(PHOTO_DIRECTORY, exist_ok=True)
-MODEL_PATH = 'stage_detect.pt'
+MODEL_PATH = 'stage_detect_ncnn_model'
 plant_monitor_running = False
 plant_monitor_lock = threading.Lock()
 
