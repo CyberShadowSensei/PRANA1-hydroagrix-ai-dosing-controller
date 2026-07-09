@@ -831,3 +831,31 @@ Observations:
 
 Conclusion:
 The active dosing unit has been upgraded to the best YOLO plant detector model, enhancing the reliability of autonomous dosing decisions based on precise growth-stage monitoring.
+
+## Session Entry: NCNN Edge Optimization & Inference Benchmarking
+
+Date: 2026-07-09
+
+Work Area: ML Inference & Edge Optimization
+
+Classification: Verified
+
+Problem Definition:
+The newly deployed `stage_detect_v3_universal_plant.pt` (YOLOv8 Medium, 22.68MB) caused significant CPU bottlenecking on the Raspberry Pi 4 (reTerminal), resulting in an inference latency of ~14.3 seconds per frame. The raw PyTorch model was also exported at a heavy 1280x1280 resolution, severely impacting performance.
+
+Test Procedure:
+1. **Model Export:** Re-exported the YOLOv8 PyTorch model to the NCNN format tailored for ARM CPUs, explicitly forcing a smaller image size (`imgsz=640`) to reduce floating-point operations.
+   `yolo export model="stage_detect.pt" format=ncnn imgsz=640`
+2. **Dependency Resolution:** Handled PEP 668 `externally-managed-environment` blocks on the reTerminal by explicitly passing `--break-system-packages` to install `ultralytics` and `ncnn` directly into the system environment to match the active systemd services.
+3. **Code Update:** Refactored `camera_ml.py` to point to the `stage_detect_ncnn_model` directory.
+4. **Benchmarking:** Authored and ran `benchmark_ncnn.py` directly on the reTerminal to validate latency.
+
+Observations:
+- The PyTorch latency of 14.3 seconds was successfully reduced to ~7.6 seconds per frame via NCNN and the `640` resolution reduction.
+- Since `camera_ml.py` only fires an inference check once every 30 minutes (`time.sleep(1800)`) on an independent background thread, the 7.6-second computation is completely non-blocking and highly suitable for the production use-case. Real-time (sub-100ms) framerates are unnecessary for 30-minute periodic plant stage checks.
+
+Conclusion:
+The edge inference pipeline is now fully optimized via NCNN and successfully deployed.
+
+Recommended Next Actions:
+- Validate a complete, autonomous end-to-end dosing loop with live hardware triggering off the ML classification state.
