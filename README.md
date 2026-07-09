@@ -1,58 +1,51 @@
-# Hydroagrix Dosing Controller
+# Hydroagrix AI Dosing Controller
 
-[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/CyberShadowSensei/hydroagrix-ai-dosing-controller)
+> The hardware automation, sensing, and control platform for the Hydroagrix hydroponic NFT system, featuring automatic dosing logic and a real-time web dashboard.
 
-The hardware automation, sensing, and control platform for the Hydroagrix hydroponic NFT system. Executes sensor telemetry (pH/EC), runs automatic dosing logic, and serves the system control panel dashboard.
+## Features
+* **Real-Time Telemetry:** Continuous monitoring of pH, Electrical Conductivity (EC), and environmental parameters.
+* **Automated Dosing:** Intelligent, feedback-driven peristaltic pump control to maintain optimal nutrient levels.
+* **Vision Integration:** Seamlessly interfaces with the edge vision pipeline to adjust dosing limits based on the plant's current growth stage.
 
----
+## Prerequisites
+* Node.js v18+ (for Frontend)
+* Python 3.10+ (for Backend)
+* I2C enabled on Raspberry Pi
 
-## System Architecture and Data Loops
+## Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/CyberShadowSensei/hydroagrix-ai-dosing-controller.git
+   ```
+2. Navigate to the project directory:
+   ```bash
+   cd hydroagrix-ai-dosing-controller
+   ```
+3. Install backend dependencies:
+   ```bash
+   cd backend && pip install -r requirements.txt
+   ```
+4. Install frontend dependencies:
+   ```bash
+   cd ../frontend && npm install
+   ```
 
-```mermaid
-graph TD
-    A[EC and pH Sensors] --> B[Grove Base HAT ADS1115 ADC via I2C]
-    B --> C[sensors.py Telemetry Engine]
-    C --> D[routes.py Flask API and Socket.IO]
-    D --> E[SQLite Database EventLog and PumpLog]
-    D --> F[system_config.json Stage Limits]
-    G[USB Camera Hiwonder] --> H[camera_ml.py Inference Engine]
-    H --> I[Update PlantStageStatus DB]
-    I --> F
-    D --> J[React Frontend Dashboard UI]
-    J --> D
-    D --> K[hal.py Hardware Abstraction Layer]
-    K --> L[Peristaltic Pumps A/B Nutrients and pH Down]
+## Usage
+```bash
+# Restart the backend and frontend systemd services on the reTerminal
+sudo systemctl restart hydro-backend.service hydro-frontend.service
 ```
 
----
+## Configuration
+* **I2C_ADDR:** Address of the Grove Base HAT ADC (default: `0x48`).
+* **TARGET_PH:** Ideal pH level for the dosing algorithm (configurable via dashboard).
 
-## Core Services and Local Commands
+## Contributing
+1. Fork the Project
+2. Create your Feature Branch (git checkout -b feature/AmazingFeature)
+3. Commit your Changes (git commit -m 'Add some AmazingFeature')
+4. Push to the Branch (git push origin feature/AmazingFeature)
+5. Open a Pull Request
 
-The reTerminal runs two systemd service layers for managing the hydroponic operations:
-
-*   **`hydro-backend.service`**: Powers the Flask API, SQLite logger, and the automated I2C dosing loops.
-*   **`hydro-frontend.service`**: Serves the React UI/web dashboard.
-
-### Management Commands on the reTerminal
-
-*   **Restart both services:**
-    ```bash
-    sudo systemctl restart hydro-backend.service hydro-frontend.service
-    ```
-*   **Check service status:**
-    ```bash
-    sudo systemctl status hydro-backend.service hydro-frontend.service
-    ```
-*   **View live backend logs:**
-    ```bash
-    sudo journalctl -u hydro-backend.service -f
-    ```
-
----
-
-## Key Features
-
-*   **Real-Time Telemetry:** Continuous monitoring of pH, Electrical Conductivity (EC), and environmental parameters.
-*   **Automated Dosing:** Intelligent, feedback-driven peristaltic pump control to maintain optimal nutrient levels.
-*   **Vision Integration:** Seamlessly interfaces with the edge vision pipeline to adjust dosing limits based on the plant's current growth stage.
-*   **Web Dashboard:** Responsive React-based frontend for remote monitoring, manual overrides, and system configuration.
+## License
+Distributed under the MIT License. See `LICENSE` for more information.
