@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { HiOutlineClock, HiOutlineBeaker, HiOutlineCheckCircle, HiOutlineExclamationCircle } from 'react-icons/hi';
+import socket from '../socket';
 
 const DosingHistory = () => {
     const [events, setEvents] = useState([]);
@@ -23,8 +24,13 @@ const DosingHistory = () => {
 
     useEffect(() => {
         fetchHistory();
-        const interval = setInterval(fetchHistory, 10000); // refresh every 10 seconds
-        return () => clearInterval(interval);
+        
+        // Listen to pump_activity socket events and update
+        socket.on('pump_activity', fetchHistory);
+        
+        return () => {
+            socket.off('pump_activity', fetchHistory);
+        };
     }, []);
 
     const getActionColor = (action) => {
@@ -46,7 +52,7 @@ const DosingHistory = () => {
                 <div>
                     <h2 className="text-xl font-semibold text-slate-100 flex items-center">
                         <HiOutlineClock className="w-6 h-6 mr-2 text-emerald-400" />
-                        Dosing Decision History
+                        Dosing History
                     </h2>
                     <p className="text-sm text-slate-400 mt-1">
                         Transparency log of automated system decisions and manual interventions

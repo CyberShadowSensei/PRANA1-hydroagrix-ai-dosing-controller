@@ -6,10 +6,10 @@ pytz
 requests
 opencv-python
 numpy
-reportlab
 RPi.GPIO
 gpiozero
 seeed-python-dht
 grove.py
 eventlet
 smbus2
+reportlab

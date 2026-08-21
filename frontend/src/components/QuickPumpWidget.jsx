@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Droplets, Settings2, PlayCircle, StopCircle } from 'lucide-react';
+import socket from '../socket';
 
 const QuickPumpWidget = () => {
   const [pumpStatus, setPumpStatus] = useState({
@@ -18,8 +19,17 @@ const QuickPumpWidget = () => {
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
+    
+    const handleTelemetry = (data) => {
+      if (data && data.pumps) {
+        setPumpStatus(data.pumps);
+      }
+    };
+    
+    socket.on('telemetry_update', handleTelemetry);
+    return () => {
+      socket.off('telemetry_update', handleTelemetry);
+    };
   }, []);
 
   const triggerPump = async (pumpId) => {

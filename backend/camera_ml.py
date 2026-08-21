@@ -7,12 +7,11 @@ import glob
 import numpy as np
 from datetime import datetime
 from config import app, db, socketio
-from models import PhotoRecord, PlantStageStatus, PlantPreset, SensorLimits
+from models import PhotoRecord, PlantStageStatus
 
 PHOTO_DIRECTORY = "captured_photos"
 os.makedirs(PHOTO_DIRECTORY, exist_ok=True)
-MODEL_PATH = 'stage_detect_ncnn_model'
-CLS_MODEL_PATH = 'yolov8n-cls_ncnn_model'
+MODEL_PATH = 'stage_detect.pt'
 plant_monitor_running = False
 plant_monitor_lock = threading.Lock()
 
@@ -26,33 +25,64 @@ global_camera = None
 stream_running = False
 latest_frame = None
 camera_lock = threading.Lock()
-ml_model_det = None
-ml_model_cls = None
+ml_model = None
 
 def get_ml_model():
-    global ml_model_det, ml_model_cls
-    if YOLO is not None:
-        if ml_model_det is None and os.path.exists(MODEL_PATH):
-            try:
-                print(f"DEBUG: Loading YOLO detector from {MODEL_PATH}...")
-                ml_model_det = YOLO(MODEL_PATH, task='detect')
-            except Exception as e:
-                print(f"DEBUG: Failed to load YOLO detector: {e}")
+    global ml_model
+    if ml_model is None and YOLO is not None and os.path.exists(MODEL_PATH):
+        try:
+            print(f"DEBUG: Loading YOLO model from {MODEL_PATH}...")
+            ml_model = YOLO(MODEL_PATH)
+        except Exception as e:
+            print(f"DEBUG: Failed to load YOLO model: {e}")
+    return ml_model
+
+def capture_single_frame():
+    """
+    Temporarily opens the camera, grabs a single stable frame, and releases it.
+    """
+    print("DEBUG: Capturing single frame on demand")
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        return None
+    try:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Flush initial frames to allow USB camera auto-exposure stabilization
+        for _ in range(20):
+            cap.read()
+            time.sleep(0.01)
         
-        if ml_model_cls is None and os.path.exists(CLS_MODEL_PATH):
-            try:
-                print(f"DEBUG: Loading YOLO classifier from {CLS_MODEL_PATH}...")
-                ml_model_cls = YOLO(CLS_MODEL_PATH, task='classify')
-            except Exception as e:
-                print(f"DEBUG: Failed to load YOLO classifier: {e}")
-                
-    return ml_model_det, ml_model_cls
+        # Read stable frame with brightness validation
+        best_frame = None
+        for _ in range(5):
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                best_frame = frame
+                if frame.mean() >= 10.0:  # Non-black frame
+                    return frame
+        return best_frame
+    except Exception as e:
+        print(f"Error in capture_single_frame: {e}")
+    finally:
+        cap.release()
+    return None
+
 
 def camera_worker():
     global global_camera, latest_frame, stream_running
     print("DEBUG: Starting Robust Camera Worker (SocketIO Task)")
     while True:
         try:
+            if not stream_running:
+                # If stream is disabled, release camera to save CPU and heat
+                if global_camera is not None:
+                    print("DEBUG: Releasing USB Camera to save CPU/heat")
+                    global_camera.release()
+                    global_camera = None
+                socketio.sleep(1.0)
+                continue
+
             if global_camera is None or not global_camera.isOpened():
                 print("DEBUG: Attempting to Open USB Camera (Hiwonder)")
                 global_camera = cv2.VideoCapture(0)
@@ -69,26 +99,24 @@ def camera_worker():
                 with camera_lock:
                     latest_frame = frame.copy()
                 
-                if stream_running:
-                    _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
-                    b64_frame = base64.b64encode(buffer).decode('utf-8')
-                    socketio.emit('camera_frame', {'image': b64_frame})
+                _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+                b64_frame = base64.b64encode(buffer).decode('utf-8')
+                socketio.emit('camera_frame', {'image': b64_frame})
+                socketio.sleep(0.05)
             else:
                 print("DEBUG: Camera frame read error, releasing camera...")
                 if global_camera: global_camera.release()
                 global_camera = None
                 socketio.sleep(2)
-            
-            socketio.sleep(0.05)
         except Exception as e:
             print(f"Camera Worker Error: {e}")
             socketio.sleep(2)
 
 def get_latest_frame():
     with camera_lock:
-        if latest_frame is not None:
+        if latest_frame is not None and stream_running:
             return latest_frame.copy()
-    return None
+    return capture_single_frame()
 
 def detect_plant_stage():
     try:
@@ -102,58 +130,80 @@ def detect_plant_stage():
         db.session.add(PhotoRecord(filename=filename, google_drive_link=filepath))
         db.session.commit()
         
-        detected_stage = "Vegetative" # Default
-        det_model, cls_model = get_ml_model()
-        
-        if det_model is not None and cls_model is not None:
-            # 1. Run Detector
-            results = det_model(frame, verbose=False)
+        detected_stage = "Vegetative"
+        annotated_filepath = None
+        model = get_ml_model()
+        if model is not None:
+            results = model(frame, verbose=False)
             if results and len(results[0].boxes) > 0:
-                # 2. Crop Plant
                 best_idx = results[0].boxes.conf.argmax().item()
-                box = results[0].boxes.xyxy[best_idx].cpu().numpy().astype(int)
-                x1, y1, x2, y2 = box
-                plant_crop = frame[y1:y2, x1:x2]
+                class_id = int(results[0].boxes.cls[best_idx].item())
+                detected_stage = results[0].names[class_id]
+                print(f"DEBUG: ML Engine detected: {detected_stage}")
                 
-                # 3. Run Classifier
-                cls_results = cls_model(plant_crop, verbose=False)
-                top_idx = cls_results[0].probs.top1
-                detected_stage = cls_model.names[top_idx]
-                
-                print(f"DEBUG: ML Engine detected stage: {detected_stage}")
+                try:
+                    annotated_frame = results[0].plot()
+                    annotated_filename = f"annotated_stage_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    annotated_filepath = os.path.join(PHOTO_DIRECTORY, annotated_filename)
+                    cv2.imwrite(annotated_filepath, annotated_frame)
+                except Exception as plot_e:
+                    print(f"DEBUG: Failed to plot YOLO bounding boxes: {plot_e}")
             else:
-                print("DEBUG: ML Engine detected no plant in frame.")
+                print("DEBUG: ML Engine detected no distinct stage (using default).")
         else:
-            print("DEBUG: ML models not fully loaded.")
+            try:
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                if isinstance(hsv, np.ndarray) and hsv.ndim == 3:
+                    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    v_clahe = clahe.apply(v)
+                    if isinstance(v_clahe, np.ndarray):
+                        hsv_clahe = np.dstack([h, s, v_clahe])
+                    else:
+                        hsv_clahe = hsv
+                else:
+                    hsv_clahe = frame
+                
+                mask = cv2.inRange(hsv_clahe, np.array([35, 40, 40]), np.array([85, 255, 255]))
+                if isinstance(mask, np.ndarray):
+                    green_pixels = np.sum(mask > 0)
+                    total_pixels = frame.shape[0] * frame.shape[1] if hasattr(frame, 'shape') and len(frame.shape) >= 2 else 1
+                    coverage = (green_pixels / total_pixels) * 100.0
+                    if coverage > 50.0:
+                        detected_stage = "Flowering"
+                    elif coverage > 15.0:
+                        detected_stage = "Vegetative"
+                    else:
+                        detected_stage = "Seedling"
+                    
+                    try:
+                        annotated_frame = frame.copy()
+                        cv2.putText(
+                            annotated_frame,
+                            f"HSV Coverage: {coverage:.1f}% - Stage: {detected_stage}",
+                            (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1.0,
+                            (0, 255, 0),
+                            2
+                        )
+                        annotated_filename = f"hsv_annotated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                        annotated_filepath = os.path.join(PHOTO_DIRECTORY, annotated_filename)
+                        cv2.imwrite(annotated_filepath, annotated_frame)
+                    except Exception as fallback_draw_e:
+                        print(f"DEBUG: Failed to draw fallback text on frame: {fallback_draw_e}")
+            except Exception as hsv_e:
+                print(f"DEBUG: HSV leaf coverage fallback error: {hsv_e}")
         
         with app.app_context():
-            import json
             status = PlantStageStatus.query.first()
             if status:
                 status.plant_stage = detected_stage
-                
-                preset = PlantPreset.query.filter_by(name=status.plant_name).first()
-                if preset:
-                    try:
-                        stages = json.loads(preset.stages_json)
-                        if detected_stage in stages:
-                            stage_limits = stages[detected_stage]
-                            
-                            ph_lim = SensorLimits.query.filter_by(sensor_type='ph').first()
-                            if ph_lim and "ph" in stage_limits:
-                                ph_lim.min_value = float(stage_limits["ph"]["min"])
-                                ph_lim.max_value = float(stage_limits["ph"]["max"])
-                                
-                            tds_lim = SensorLimits.query.filter_by(sensor_type='tds').first()
-                            if tds_lim and "ec" in stage_limits:
-                                tds_lim.min_value = float(stage_limits["ec"]["min"])
-                                tds_lim.max_value = float(stage_limits["ec"]["max"])
-                    except Exception as parse_e:
-                        print(f"DEBUG: Failed to parse PlantPreset limits for ML update: {parse_e}")
-                
                 db.session.commit()
+                from grow_cycle_helper import get_active_grow_cycle_details
+                socketio.emit('grow_cycle_update', get_active_grow_cycle_details())
                 
-        return detected_stage
+        return {"stage": detected_stage, "annotated_filepath": annotated_filepath}
     except Exception as e:
         print(f"Detect Plant Stage Error: {e}")
         return None
@@ -202,10 +252,12 @@ def _plant_monitor_loop():
         try:
             with app.app_context():
                 detect_plant_stage()
-                print("DEBUG: Plant stage detection completed. Next run in 30 minutes.")
+                print("DEBUG: Plant stage detection completed. Next run in 24 hours.")
         except Exception as e:
             print(f"DEBUG: Plant monitor error: {e}")
-        time.sleep(1800)
+        time.sleep(86400)
+
+plant_monitor_thread = _plant_monitor_loop
 
 def start_plant_monitor():
     global plant_monitor_running

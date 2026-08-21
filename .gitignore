@@ -3,31 +3,68 @@ node_modules/
 dist/
 build/
 .svelte-kit/
+coverage/
 
-# Python Environment
+# Python Environment & Cache
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
 venv/
 .venv/
 env/
 .env
 
-# Model weights (large files)
-*.pt
-*.bin
-*.param
-!backend/stage_detect.pt
-
-# Log files and local configs
+# Database Files & Local Runtime Logs
+*.db
+*.db-shm
+*.db-wal
+backend/instance/*.db*
+backend/mydatabase.db
+mydatabase.db
 *.log
-backend/captured_photos/*.jpg
-backend/captured_photos/*.mp4
-!backend/captured_photos/test_plant.jpg
+logs.txt
+backend/test_output.txt
+frontend/vitest-results.json
+
+# Internal AI Configurations & Memory
+.agents/
+.superpowers/
+CLAUDE.md
+RULE.md
+RULES.md
+SKILL-*.md
+
+# Internal Documentation, Engineering Session Logs & Charters
+ORIGINAL_REQUEST.md
+Engineering Session Log.md
+Deployment Notes.md
+plant_preset_update_prompt.md
+plan.md
+user_journey.txt
+Hardware Configuration Notes.md
+Hydroponics Project Engineering Charter.md
+Hydroponics_Engineering_Project_Dossier.docx
+Calibration Records - *.md
+Test Report - *.md
+technical_debt/
+scratch/
+
+# Artifact Dumps, Screenshots & Local Diffs
+*.diff
+*.tar.gz
+*.pdf
+*.webp
+mail ss 1.jpeg
+mail ss 2.jpeg
+captured_photos/
+test_scp.ps1
+
+# Configuration & Secrets
 email_config.json
 system_config.json
 
-# IDEs
+# IDEs & System Files
 .idea/
 .vscode/
 .DS_Store

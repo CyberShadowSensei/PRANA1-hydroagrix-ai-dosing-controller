@@ -75,63 +75,6 @@ const History = () => {
     }
   };
 
-  const downloadPDF = async () => {
-    try {
-      const response = await axios.get('/download_database_pdf', { responseType: 'blob' });
-      if (response.status === 200) {
-        const url = window.URL.createObjectURL(response.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'PlantCareDashboard.pdf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } else {
-        console.error("Failed to fetch database pdf");
-      }
-    } catch (error) {
-      console.error("Error downloading database PDF:", error);
-    }
-  };
-
-  const generateGrowthCycleReport = async () => {
-    if (!reportStartDate || !reportEndDate) {
-      alert("Please select both start and end dates.");
-      return;
-    }
-    
-    setIsGenerating(true);
-    try {
-      // Create date objects and adjust for end of day for the end date if needed
-      // Currently just passes the raw ISO string for the selected dates
-      const startIso = new Date(reportStartDate + 'T00:00:00').toISOString();
-      const endIso = new Date(reportEndDate + 'T23:59:59').toISOString();
-
-      const response = await axios.post('/generate_growth_cycle_report', {
-        start_date: startIso,
-        end_date: endIso
-      }, { responseType: 'blob' });
-      
-      if (response.status === 200) {
-        const url = window.URL.createObjectURL(response.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Growth_Cycle_Report.pdf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } else {
-        alert("Failed to generate report.");
-      }
-    } catch (error) {
-      console.error("Error generating report:", error);
-      alert("Error generating report. Check console.");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
 
   useEffect(() => {
@@ -168,7 +111,7 @@ const History = () => {
     };
   
     fetchTemperatureHumidityData();
-    const interval = setInterval(fetchTemperatureHumidityData, 10000);
+    const interval = setInterval(fetchTemperatureHumidityData, 300000);
   
     return () => clearInterval(interval);
   }, []);
@@ -235,7 +178,7 @@ const History = () => {
       }
     };
     fetchTDSData();
-    const interval = setInterval(fetchTDSData, 10000);
+    const interval = setInterval(fetchTDSData, 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -270,7 +213,7 @@ const History = () => {
       }
     };
     fetchPHData();
-    const interval = setInterval(fetchPHData, 10000);
+    const interval = setInterval(fetchPHData, 300000);
     return () => clearInterval(interval);
   }, []);
   
@@ -289,48 +232,13 @@ const History = () => {
             >
               Download CSV
             </button>
-            <button 
-              onClick={downloadPDF} 
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition duration-200"
-            >
-              Download PDF
-            </button>
+
           </div>
         </div>
 
         {/* Content */}
         <div className="p-4 md:p-6">
-          {/* Custom Report Builder */}
-          <div className="mb-6 rounded-lg bg-slate-800/80 border border-slate-700/50 p-4">
-            <h3 className="text-lg font-medium text-emerald-400 mb-3">Growth Cycle Report Builder</h3>
-            <div className="flex flex-wrap items-end gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Start Date</label>
-                <input 
-                  type="date" 
-                  className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white outline-none focus:border-emerald-500"
-                  value={reportStartDate}
-                  onChange={(e) => setReportStartDate(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">End Date</label>
-                <input 
-                  type="date" 
-                  className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white outline-none focus:border-emerald-500"
-                  value={reportEndDate}
-                  onChange={(e) => setReportEndDate(e.target.value)}
-                />
-              </div>
-              <button 
-                onClick={generateGrowthCycleReport}
-                disabled={isGenerating}
-                className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-medium rounded-lg transition duration-200 disabled:opacity-50"
-              >
-                {isGenerating ? "Generating..." : "Download Growth Cycle Report"}
-              </button>
-            </div>
-          </div>
+
 
           <div className="grid md:grid-cols-2 gap-4">
             

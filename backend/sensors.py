@@ -11,10 +11,15 @@ from models import EventLog
 
 sensor_monitor = SensorMonitor()
 
+# Cache the IST timezone once at module level instead of constructing it
+# on every sensor read (6 times/second = 518,400 constructions/day).
+IST = pytz.timezone('Asia/Kolkata')
+
 # --- LIVE MEMORY BUFFERS ---
 live_ph_data = deque(maxlen=60)
 live_tds_data = deque(maxlen=60)
 live_th_data = deque(maxlen=60)
+
 
 def log_event(event_id, category, message, details=None):
     try:
@@ -32,11 +37,18 @@ def log_event(event_id, category, message, details=None):
 
 def get_water_temp():
     fallback_temp = 25.0
+    air_temp = 25.0
     if live_th_data:
         latest_th = live_th_data[-1]
         if latest_th.get("status") == "OK" and latest_th.get("t") is not None:
-            fallback_temp = float(latest_th["t"])
-    return hal.get_water_temp(fallback_temp)
+            air_temp = float(latest_th["t"])
+            fallback_temp = air_temp
+            
+    raw_temp = hal.get_water_temp(fallback_temp)
+    if raw_temp == fallback_temp:
+        estimated_temp = round(max(15.0, min(35.0, air_temp - 2.0)), 1)
+        return estimated_temp, True
+    return raw_temp, False
 
 def load_calibration(path):
     try:
@@ -81,7 +93,8 @@ def apply_ph_calibration(raw_val, water_temp):
         t_meas_k = water_temp + 273.15
         final_ph = neutral_ph + (uncompensated_ph - neutral_ph) * (t_cal_k / t_meas_k)
         
-    return max(-2.0, min(14.0, final_ph))
+    return max(0.0, min(14.0, final_ph))
+
 
 def apply_ec_calibration(raw_val, water_temp):
     if not EC_CALIBRATION:
@@ -108,7 +121,9 @@ def apply_ec_calibration(raw_val, water_temp):
     return max(0.0, actual_ec / correction_factor)
 
 def fetch_ph(w_t=None):
-    if w_t is None: w_t = get_water_temp()
+    is_estimated = False
+    if w_t is None: 
+        w_t, is_estimated = get_water_temp()
     try:
         raw_ph = hal.get_stable_reading(hal.PH_CHANNEL)
         if raw_ph is None or raw_ph <= 0 or raw_ph > 4080:
@@ -126,13 +141,16 @@ def fetch_ph(w_t=None):
         "value": v,
         "status": status,
         "water_temp": w_t,
+        "is_water_temp_estimated": is_estimated,
         "air_temp": a_t,
-        "time": datetime.now(pytz.timezone('Asia/Kolkata'))
+        "time": datetime.now(IST)
     })
     return {"ph_value": v, "status": status}
 
 def fetch_tds(w_t=None):
-    if w_t is None: w_t = get_water_temp()
+    is_estimated = False
+    if w_t is None: 
+        w_t, is_estimated = get_water_temp()
     try:
         raw_ec = hal.get_stable_reading(hal.EC_CHANNEL)
         # Reject raw reads that signify an unplugged sensor or floating bus
@@ -150,17 +168,21 @@ def fetch_tds(w_t=None):
         "value": v,
         "status": status,
         "water_temp": w_t,
+        "is_water_temp_estimated": is_estimated,
         "air_temp": a_t,
-        "time": datetime.now(pytz.timezone('Asia/Kolkata'))
+        "time": datetime.now(IST)
     })
     return {"tds_value": v, "status": status}
 
 def fetch_th():
     humi, t, status = hal.get_climate()
-    live_th_data.append({
-        "t": t, 
-        "h": humi, 
-        "status": status, 
-        "time": datetime.now(pytz.timezone('Asia/Kolkata'))
-    })
+    if not live_th_data or live_th_data[-1]["t"] != t or live_th_data[-1]["h"] != humi or live_th_data[-1]["status"] != status:
+        live_th_data.append({
+            "t": t, 
+            "h": humi, 
+            "status": status, 
+            "time": datetime.now(IST)
+        })
     return {"temperature": t, "humidity": humi, "status": status}
+
+

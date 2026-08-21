@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { HiX, HiCheckCircle } from 'react-icons/hi';
 
-// Using your local downloaded images for a fully offline-ready experience
+// Using local downloaded images for offline capability
 const avatars = [
     { id: 'leaf', name: 'Leafy Green', url: '/images/leafy green.avif' },
     { id: 'vine', name: 'Vine Crop', url: '/images/vine crop.jpg' },
@@ -11,14 +11,45 @@ const avatars = [
     { id: 'strawberry', name: 'Strawberry', url: '/images/strawberry.PNG' },
     { id: 'tomato', name: 'Tomato', url: '/images/tomato.jpg' },
     { id: 'spinach', name: 'Spinach', url: '/images/spinach.jpg' },
-    { id: 'lettuce', name: 'Lettuce', url: '/images/lettuce.jpg' }
+    { id: 'lettuce', name: 'Lettuce', url: '/images/lettuce.jpg' },
+    { id: 'tulsi_basil', name: 'Tulsi/Basil', url: '/images/tulsi_basil.jpg' }
 ];
 
-const stageLabels = {
-    Germination: "1. Starting (Seeds)",
-    Vegetative: "2. Growing (Leaves)",
-    Flowering: "3. Blooming (Flowers)",
-    Maturity: "4. Harvest (Ready)"
+export const STAGE_KEYS = ['Seedling', 'Vegetative', 'Harvesting'];
+
+export const stageLabels = {
+    Seedling: "1. Seedling / Germination",
+    Vegetative: "2. Vegetative Growth",
+    Harvesting: "3. Harvesting / Maturity"
+};
+
+const defaultStages = {
+    Seedling: { ec: { min: 0.8, max: 1.2 }, ph: { min: 5.5, max: 6.5 }, duration_days: 7 },
+    Vegetative: { ec: { min: 1.2, max: 2.0 }, ph: { min: 5.8, max: 6.8 }, duration_days: 14 },
+    Harvesting: { ec: { min: 1.5, max: 2.2 }, ph: { min: 5.8, max: 6.5 }, duration_days: 30 }
+};
+
+const getStageDefaults = (stagesInput, stageKey, fallbackKeys, defaultVal) => {
+    let raw = stagesInput?.[stageKey];
+    if (!raw && fallbackKeys) {
+        for (const fKey of fallbackKeys) {
+            if (stagesInput?.[fKey]) {
+                raw = stagesInput[fKey];
+                break;
+            }
+        }
+    }
+    return {
+        ec: {
+            min: raw?.ec?.min !== undefined ? raw.ec.min : defaultVal.ec.min,
+            max: raw?.ec?.max !== undefined ? raw.ec.max : defaultVal.ec.max
+        },
+        ph: {
+            min: raw?.ph?.min !== undefined ? raw.ph.min : defaultVal.ph.min,
+            max: raw?.ph?.max !== undefined ? raw.ph.max : defaultVal.ph.max
+        },
+        duration_days: raw?.duration_days !== undefined ? raw.duration_days : defaultVal.duration_days
+    };
 };
 
 const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
@@ -27,33 +58,26 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
     const [formData, setFormData] = useState({
         name: '',
         image_url: defaultImageUrl,
-        stages: {
-            Vegetative: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-            Flowering: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-            Maturity: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } }
-        }
+        stages: { ...defaultStages }
     });
 
     useEffect(() => {
         if (presetToEdit) {
+            const rawStages = presetToEdit.stages || presetToEdit.stages_json || {};
             setFormData({
                 name: presetToEdit.name || '',
-                image_url: presetToEdit.image || defaultImageUrl,
+                image_url: presetToEdit.image || presetToEdit.image_url || defaultImageUrl,
                 stages: {
-                    Vegetative: presetToEdit.stages?.Vegetative || { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-                    Flowering: presetToEdit.stages?.Flowering || { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-                    Maturity: presetToEdit.stages?.Maturity || { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } }
+                    Seedling: getStageDefaults(rawStages, 'Seedling', ['Germination'], defaultStages.Seedling),
+                    Vegetative: getStageDefaults(rawStages, 'Vegetative', [], defaultStages.Vegetative),
+                    Harvesting: getStageDefaults(rawStages, 'Harvesting', ['Flowering', 'Maturity'], defaultStages.Harvesting)
                 }
             });
         } else {
             setFormData({
                 name: '',
                 image_url: defaultImageUrl,
-                stages: {
-                    Vegetative: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-                    Flowering: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } },
-                    Maturity: { ec: { min: 0, max: 0 }, ph: { min: 0, max: 0 } }
-                }
+                stages: JSON.parse(JSON.stringify(defaultStages))
             });
         }
     }, [presetToEdit, isOpen]);
@@ -69,8 +93,21 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
                     ...prev.stages[stage],
                     [parameter]: {
                         ...prev.stages[stage][parameter],
-                        [bound]: parseFloat(value) || 0
+                        [bound]: value === '' ? '' : parseFloat(value) || 0
                     }
+                }
+            }
+        }));
+    };
+
+    const handleDurationChange = (stage, value) => {
+        setFormData(prev => ({
+            ...prev,
+            stages: {
+                ...prev.stages,
+                [stage]: {
+                    ...prev.stages[stage],
+                    duration_days: value === '' ? '' : parseInt(value, 10) || 0
                 }
             }
         }));
@@ -78,7 +115,55 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave(formData);
+        const seedlingDuration = parseInt(formData.stages.Seedling.duration_days, 10) || 7;
+        const vegDuration = parseInt(formData.stages.Vegetative.duration_days, 10) || 14;
+        const harvestDuration = parseInt(formData.stages.Harvesting.duration_days, 10) || 30;
+
+        const payload = {
+            name: formData.name,
+            image_url: formData.image_url,
+            image: formData.image_url,
+            stages: {
+                Seedling: {
+                    ec: {
+                        min: parseFloat(formData.stages.Seedling.ec.min) || 0,
+                        max: parseFloat(formData.stages.Seedling.ec.max) || 0
+                    },
+                    ph: {
+                        min: parseFloat(formData.stages.Seedling.ph.min) || 0,
+                        max: parseFloat(formData.stages.Seedling.ph.max) || 0
+                    },
+                    duration_days: seedlingDuration,
+                    start_day: 0
+                },
+                Vegetative: {
+                    ec: {
+                        min: parseFloat(formData.stages.Vegetative.ec.min) || 0,
+                        max: parseFloat(formData.stages.Vegetative.ec.max) || 0
+                    },
+                    ph: {
+                        min: parseFloat(formData.stages.Vegetative.ph.min) || 0,
+                        max: parseFloat(formData.stages.Vegetative.ph.max) || 0
+                    },
+                    duration_days: vegDuration,
+                    start_day: seedlingDuration
+                },
+                Harvesting: {
+                    ec: {
+                        min: parseFloat(formData.stages.Harvesting.ec.min) || 0,
+                        max: parseFloat(formData.stages.Harvesting.ec.max) || 0
+                    },
+                    ph: {
+                        min: parseFloat(formData.stages.Harvesting.ph.min) || 0,
+                        max: parseFloat(formData.stages.Harvesting.ph.max) || 0
+                    },
+                    duration_days: harvestDuration,
+                    start_day: seedlingDuration + vegDuration
+                }
+            }
+        };
+
+        onSave(payload);
     };
 
     return (
@@ -88,7 +173,7 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
                     <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500">
                         {presetToEdit ? 'Edit Plant Settings' : 'Add a New Plant'}
                     </h2>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+                    <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white transition-colors">
                         <HiX className="w-6 h-6" />
                     </button>
                 </div>
@@ -125,7 +210,7 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
                                                 className="w-full h-20 object-cover" 
                                                 onError={(e) => {
                                                     e.target.onerror = null;
-                                                    e.target.src = "/images/lettuce.jpg"; // Internal fallback
+                                                    e.target.src = "/images/lettuce.jpg";
                                                 }}
                                             />
                                             <div className="absolute inset-x-0 bottom-0 bg-black/60 p-1 text-center text-[10px] font-bold text-white uppercase tracking-tight">
@@ -142,29 +227,29 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
                             </div>
                         </div>
 
-                        {/* Growth Settings */}
+                        {/* Growth Settings - 3 Canonical Phases */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">Nutrient & Acidity Settings</h3>
-                            <p className="text-xs text-slate-500 italic">Set the target levels for each stage of your plant's life.</p>
+                            <h3 className="text-lg font-semibold text-slate-200 border-b border-slate-800 pb-2">3-Phase Growth & Target Settings</h3>
+                            <p className="text-xs text-slate-500 italic">Set the duration and target EC/pH ranges for each growth phase.</p>
 
-                            {['Vegetative', 'Flowering', 'Maturity'].map(stage => (
-                                <div key={stage} className="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
-                                    <h4 className="font-medium text-emerald-400 mb-4">{stageLabels[stage]}</h4>
-                                    <div className="grid grid-cols-2 gap-6">
+                            {STAGE_KEYS.map(stage => (
+                                <div key={stage} className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-4">
+                                    <h4 className="font-medium text-emerald-400">{stageLabels[stage]}</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         {/* Nutrients */}
                                         <div className="space-y-2">
                                             <label className="text-xs text-slate-400 font-bold tracking-wide">Nutrients (EC)</label>
                                             <div className="flex space-x-2">
                                                 <input
-                                                    type="number" step="0.1" title="Min Nutrients"
-                                                    value={formData.stages[stage]?.ec?.min || 0}
+                                                    type="number" step="0.1" title={`${stage} Min EC`} aria-label={`${stage} Min EC`}
+                                                    value={formData.stages[stage]?.ec?.min ?? 0}
                                                     onChange={e => handleStageChange(stage, 'ec', 'min', e.target.value)}
                                                     className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-emerald-500"
                                                 />
                                                 <span className="text-slate-500 flex items-center">-</span>
                                                 <input
-                                                    type="number" step="0.1" title="Max Nutrients"
-                                                    value={formData.stages[stage]?.ec?.max || 0}
+                                                    type="number" step="0.1" title={`${stage} Max EC`} aria-label={`${stage} Max EC`}
+                                                    value={formData.stages[stage]?.ec?.max ?? 0}
                                                     onChange={e => handleStageChange(stage, 'ec', 'max', e.target.value)}
                                                     className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-emerald-500"
                                                 />
@@ -176,19 +261,32 @@ const PresetManagerModal = ({ isOpen, onClose, presetToEdit, onSave }) => {
                                             <label className="text-xs text-slate-400 font-bold tracking-wide">Acidity (pH)</label>
                                             <div className="flex space-x-2">
                                                 <input
-                                                    type="number" step="0.1" title="Min pH"
-                                                    value={formData.stages[stage]?.ph?.min || 0}
+                                                    type="number" step="0.1" title={`${stage} Min pH`} aria-label={`${stage} Min pH`}
+                                                    value={formData.stages[stage]?.ph?.min ?? 0}
                                                     onChange={e => handleStageChange(stage, 'ph', 'min', e.target.value)}
                                                     className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-emerald-500"
                                                 />
                                                 <span className="text-slate-500 flex items-center">-</span>
                                                 <input
-                                                    type="number" step="0.1" title="Max pH"
-                                                    value={formData.stages[stage]?.ph?.max || 0}
+                                                    type="number" step="0.1" title={`${stage} Max pH`} aria-label={`${stage} Max pH`}
+                                                    value={formData.stages[stage]?.ph?.max ?? 0}
                                                     onChange={e => handleStageChange(stage, 'ph', 'max', e.target.value)}
                                                     className="w-1/2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-emerald-500"
                                                 />
                                             </div>
+                                        </div>
+
+                                        {/* Duration */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs text-slate-400 font-bold tracking-wide">Phase Duration (Days)</label>
+                                            <input
+                                                type="number" min="1" step="1" title={`${stage} Duration (Days)`} aria-label={`${stage} Duration (Days)`}
+                                                required
+                                                value={formData.stages[stage]?.duration_days ?? 7}
+                                                onChange={e => handleDurationChange(stage, e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-emerald-500"
+                                                placeholder="Duration in days"
+                                            />
                                         </div>
                                     </div>
                                 </div>

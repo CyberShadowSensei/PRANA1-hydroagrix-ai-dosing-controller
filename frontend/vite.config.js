@@ -18,7 +18,10 @@ export default defineConfig({
   server: {
     host: true,
     port: 3000,
-    strictPort: true, // Fail if port 3000 is taken
+    strictPort: true,
+    hmr: {
+      overlay: false
+    },
     proxy: {
       '/api': 'http://localhost:5000',
       '/get_location': 'http://localhost:5000',
@@ -37,7 +40,7 @@ export default defineConfig({
       '/set_active_plant': 'http://localhost:5000',
       '/get_photo_records': 'http://localhost:5000',
       '/get_latest_photo': 'http://localhost:5000',
-      '/pump': 'http://localhost:5000',
+      '/pump/': 'http://localhost:5000',
       '/toggle_fan': 'http://localhost:5000',
       '/capture_photo': 'http://localhost:5000',
       '/start_stream': 'http://localhost:5000',
@@ -51,6 +54,9 @@ export default defineConfig({
       '/get_pump_logs': 'http://localhost:5000',
       '/download_database_pdf': 'http://localhost:5000',
       '/download_database_csv': 'http://localhost:5000',
+      '/update_grow_cycle_progress': 'http://localhost:5000',
+      '/get_grow_cycle_status': 'http://localhost:5000',
+      '/complete_cycle': 'http://localhost:5000',
 
       '/socket.io': {
         target: 'http://localhost:5000',

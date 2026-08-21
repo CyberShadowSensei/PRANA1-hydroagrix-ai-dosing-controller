@@ -39,6 +39,9 @@ const NavBar = () => {
           <button
             onClick={toggleMenu}
             className="text-slate-200 hover:text-white p-2"
+            aria-label="Toggle navigation menu"
+            aria-expanded={isOpen}
+            aria-controls="mobile-menu"
           >
             {isOpen ? (
               <HiX className="h-6 w-6" />
@@ -50,7 +53,7 @@ const NavBar = () => {
       </div>
 
       {/* Main Navigation */}
-      <div className={`fixed top-0 left-0 h-full flex flex-col items-center bg-gradient-to-b from-slate-800 to-slate-900 w-full md:w-[20vw] md:min-w-[250px] border-r border-slate-700/30 shadow-lg z-20 overflow-y-auto transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      <div id="mobile-menu" className={`fixed top-0 left-0 h-full flex flex-col items-center bg-gradient-to-b from-slate-800 to-slate-900 w-full md:w-[20vw] md:min-w-[250px] border-r border-slate-700/30 shadow-lg z-20 overflow-y-auto transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}>
         {/* Logo */}
         <div className="w-full text-center p-6 border-b border-slate-700/30 hidden md:block">

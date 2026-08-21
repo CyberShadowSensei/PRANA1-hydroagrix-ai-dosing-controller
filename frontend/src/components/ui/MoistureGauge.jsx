@@ -1,5 +1,5 @@
 import React from "react";
-import GaugeChart from "react-gauge-chart";
+import SmoothGauge from "./SmoothGauge";
 
 const MoistureGauge = ({ value, state, time }) => {
   console.log("MoistureGauge received value:", value, "type:", typeof value);
@@ -21,19 +21,10 @@ const MoistureGauge = ({ value, state, time }) => {
       
       <div className="flex-1 flex flex-col items-center justify-center relative">
         <div className="relative w-48">
-          <GaugeChart
-            id="ph-gauge"
-            nrOfLevels={20}
+          <SmoothGauge
+            percent={percentValue}
             arcsLength={[300 / 2000, 200 / 2000, 1400 / 2000]}
             colors={["#0074FF", "#00BFFF", "#000080"]}
-            percent={percentValue}
-            arcWidth={0.12}
-            arcPadding={0.02}
-            needleColor="#E2E8F0"
-            needleBaseColor="#475569"
-            textColor="transparent"
-            formatTextValue={() => ""}
-            cornerRadius={5}
           />
         </div>
 

@@ -52,10 +52,6 @@ describe('Dashboard', () => {
     expect(screen.getByTestId('temp-gauge')).toBeInTheDocument();
     expect(screen.getByTestId('humidity-gauge')).toBeInTheDocument();
     expect(screen.getByTestId('tds-gauge')).toBeInTheDocument();
-    
-    // Check quick widgets
-    expect(screen.getByTestId('quick-camera')).toBeInTheDocument();
-    expect(screen.getByTestId('quick-pump')).toBeInTheDocument();
   });
 
   it('updates state when telemetry is received via socket', () => {

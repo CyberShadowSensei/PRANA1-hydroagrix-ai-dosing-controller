@@ -22,33 +22,9 @@ const PHSensor = () => {
   const [isLoading, setIsLoading] = useState(false);
   const maxDataPoints = 20; // Limit the number of points shown on graph
 
-  const fetchPHData = async () => {
-    setIsLoading(true);
-    try {
-      const response = await axios.get('/get_ph');
-      const data = response.data;
-      
-      // Update current PH value
-      if (data && data.ph_value !== undefined) {
-        const phValue = parseFloat(data.ph_value);
-        setCurrentPH({
-          value: isNaN(phValue) ? 0 : parseFloat(phValue.toFixed(2)),
-          state: getPHState(isNaN(phValue) ? 0 : phValue)
-        });
-        // NOTE: We no longer push this single reading into the historical chart array.
-        // Pushing random live readings into 10-minute historical data causes irregular graph intervals.
-      }
-    } catch (error) {
-      console.error("Error fetching PH data:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const setSensorData = setPHData;
-
   useEffect(() => {
     const fetchPHHistoryData = async () => {
+      setIsLoading(true);
       try {
         const response = await axios.get('/get_ph_history');
         const data = response.data;
@@ -61,34 +37,37 @@ const PHSensor = () => {
           };
         });
 
-        // Get the last maxDataPoints for the chart
         const recentData = formattedData.slice(-maxDataPoints);
-        setSensorData(recentData);
+        setPHData(recentData);
       } catch (error) {
         console.error("Error fetching historical PH data:", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchPHHistoryData();
-
     const historyInterval = setInterval(fetchPHHistoryData, 300000); // Chart updates every 5 mins
-    
-    // Using singleton socket imported from ../socket
-    socket.on('telemetry_update', (data) => {
+
+    // Named handler so socket.off only removes THIS component's listener,
+    // not all telemetry_update listeners on the singleton socket.
+    const handleTelemetry = (data) => {
       const now = new Date().toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       if (data.ph !== null && data.ph !== undefined) {
         setCurrentPH({ value: data.ph, state: getPHState(data.ph), time: 'Live' });
-        setSensorData(prev => {
+        setPHData(prev => {
           if (prev.length === 0) return prev;
           const withoutLive = prev.filter(p => !p.isLive);
           return [...withoutLive, { time: now, value: data.ph, state: getPHState(data.ph), isLive: true }];
         });
       }
-    });
+    };
+
+    socket.on('telemetry_update', handleTelemetry);
 
     return () => {
       clearInterval(historyInterval);
-      socket.off('telemetry_update');
+      socket.off('telemetry_update', handleTelemetry);
     };
   }, []);
 

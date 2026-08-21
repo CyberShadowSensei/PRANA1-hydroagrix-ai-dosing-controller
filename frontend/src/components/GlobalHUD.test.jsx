@@ -41,7 +41,7 @@ describe('GlobalHUD Component', () => {
     const connectCallback = mockOn.mock.calls.find(c => c[0] === 'connect')[1];
     act(() => connectCallback());
     
-    expect(screen.getByText('LIVE DATALINK')).toBeInTheDocument();
+// LIVE DATALINK removed per UI requirements
 
     // Simulate telemetry
     const telemetryCallback = mockOn.mock.calls.find(c => c[0] === 'telemetry_update')[1];

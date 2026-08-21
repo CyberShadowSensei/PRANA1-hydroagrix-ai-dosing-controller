@@ -3,6 +3,8 @@ import axios from 'axios';
 import { Camera, Square, Lightbulb, Fan, Video, X } from 'lucide-react';
 import socket from "../socket";
 
+const ENABLE_PERIPHERALS = false;
+
 const PlantCamera = () => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isLiveStreaming, setIsLiveStreaming] = useState(false);
@@ -156,41 +158,43 @@ const PlantCamera = () => {
               </div>
             </div>
 
-            <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-6 shadow-xl border border-slate-800/50">
-              <h3 className="text-lg font-semibold text-slate-100 mb-4">Device Toggles</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Lightbulb className={`transition-colors ${lightStatus === 'ON' ? 'text-yellow-400' : 'text-slate-600'}`} size={20} />
-                    <span className="font-semibold text-white">Grow Light</span>
+            {ENABLE_PERIPHERALS && (
+              <div className="bg-slate-900/50 backdrop-blur-sm rounded-xl p-6 shadow-xl border border-slate-800/50">
+                <h3 className="text-lg font-semibold text-slate-100 mb-4">Device Toggles</h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <Lightbulb className={`transition-colors ${lightStatus === 'ON' ? 'text-yellow-400' : 'text-slate-600'}`} size={20} />
+                      <span className="font-semibold text-white">Grow Light</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs font-bold uppercase ${lightStatus === 'ON' ? 'text-yellow-400' : 'text-slate-500'}`}>{lightStatus}</span>
+                      <button
+                        onClick={toggleLight}
+                        className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${lightStatus === 'ON' ? 'bg-yellow-400/30' : 'bg-slate-700'}`}
+                      >
+                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${lightStatus === 'ON' ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs font-bold uppercase ${lightStatus === 'ON' ? 'text-yellow-400' : 'text-slate-500'}`}>{lightStatus}</span>
-                    <button
-                      onClick={toggleLight}
-                      className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${lightStatus === 'ON' ? 'bg-yellow-400/30' : 'bg-slate-700'}`}
-                    >
-                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${lightStatus === 'ON' ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <Fan className={`transition-colors ${fanStatus === 'ON' ? 'text-sky-400' : 'text-slate-600'}`} size={20} />
-                    <span className="font-semibold text-white">Air Circulation</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs font-bold uppercase ${fanStatus === 'ON' ? 'text-sky-400' : 'text-slate-500'}`}>{fanStatus}</span>
-                    <button
-                      onClick={toggleFan}
-                      className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${fanStatus === 'ON' ? 'bg-sky-400/30' : 'bg-slate-700'}`}
-                    >
-                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${fanStatus === 'ON' ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+                  <div className="flex justify-between items-center bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-3">
+                      <Fan className={`transition-colors ${fanStatus === 'ON' ? 'text-sky-400' : 'text-slate-600'}`} size={20} />
+                      <span className="font-semibold text-white">Air Circulation</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs font-bold uppercase ${fanStatus === 'ON' ? 'text-sky-400' : 'text-slate-500'}`}>{fanStatus}</span>
+                      <button
+                        onClick={toggleFan}
+                        className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${fanStatus === 'ON' ? 'bg-sky-400/30' : 'bg-slate-700'}`}
+                      >
+                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${fanStatus === 'ON' ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

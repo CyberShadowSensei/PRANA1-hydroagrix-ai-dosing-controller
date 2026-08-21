@@ -3,12 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
 import QuickCameraWidget from './QuickCameraWidget';
 
-const mockOn = vi.fn();
-const mockDisconnect = vi.fn();
+const { mockOn, mockOff, mockDisconnect } = vi.hoisted(() => {
+  return {
+    mockOn: vi.fn(),
+    mockOff: vi.fn(),
+    mockDisconnect: vi.fn(),
+  };
+});
+
 vi.mock('socket.io-client', () => {
   return {
     io: () => ({
       on: mockOn,
+      off: mockOff,
       disconnect: mockDisconnect
     })
   };
@@ -69,7 +76,7 @@ describe('QuickCameraWidget', () => {
 
     await waitFor(() => {
       expect(axios.post).toHaveBeenCalledWith('/stop_stream');
-      expect(mockDisconnect).toHaveBeenCalled();
+      expect(mockOff).toHaveBeenCalledWith('camera_frame');
     });
     
     expect(screen.getByText('START')).toBeInTheDocument();

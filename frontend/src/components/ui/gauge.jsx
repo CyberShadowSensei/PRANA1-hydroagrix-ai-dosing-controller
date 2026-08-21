@@ -1,5 +1,5 @@
 import React from "react";
-import GaugeChart from "react-gauge-chart";
+import SmoothGauge from "./SmoothGauge";
 
 const Gauge = ({ value, time }) => {
   const normalizedValue = Math.min(Math.max(Number(value) || 0, 0), 14);
@@ -16,19 +16,10 @@ const Gauge = ({ value, time }) => {
       
       <div className="flex-1 flex flex-col items-center justify-center relative">
         <div className="relative w-48">
-          <GaugeChart
-            id="ph-gauge"
-            nrOfLevels={20}
+          <SmoothGauge
+            percent={percentValue}
             arcsLength={[5 / 14, 2.5 / 14, 6.5 / 14]}
             colors={["#FF0F0F", "#00FF44", "#FF0F0F"]}
-            percent={percentValue}
-            arcWidth={0.12}
-            arcPadding={0.02}
-            needleColor="#E2E8F0"
-            needleBaseColor="#475569"
-            textColor="transparent"
-            formatTextValue={() => ""}
-            cornerRadius={5}
           />
         </div>
 

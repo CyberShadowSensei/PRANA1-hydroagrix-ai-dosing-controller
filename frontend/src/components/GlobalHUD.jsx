@@ -38,30 +38,22 @@ const GlobalHUD = () => {
   return (
     <div className="w-full bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex justify-between items-center px-6 py-3 shadow-md z-40 relative">
       <div className="flex items-center space-x-2">
-        {connected && (
-          <>
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              LIVE DATALINK
-            </span>
-          </>
-        )}
       </div>
 
       <div className="flex space-x-6">
         <div className="flex flex-col items-center">
           <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">pH Level</span>
-          <span className="text-xl font-bold text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.4)]">{telemetry.ph}</span>
+          <span className="text-xl font-bold text-cyan-400">{telemetry.ph}</span>
         </div>
         <div className="w-px h-8 bg-slate-800" />
         <div className="flex flex-col items-center">
           <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">EC (mS/cm)</span>
-          <span className="text-xl font-bold text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]">{telemetry.ec}</span>
+          <span className="text-xl font-bold text-emerald-400">{telemetry.ec}</span>
         </div>
         <div className="w-px h-8 bg-slate-800" />
         <div className="flex flex-col items-center">
           <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Temp (°C)</span>
-          <span className="text-xl font-bold text-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.4)]">{telemetry.temperature}</span>
+          <span className="text-xl font-bold text-orange-400">{telemetry.temperature}</span>
         </div>
       </div>
     </div>

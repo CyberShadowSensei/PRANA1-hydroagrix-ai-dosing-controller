@@ -57,7 +57,7 @@ const Temperature = () => {
     };
 
     fetchTemperatureHumidityData();
-    const interval = setInterval(fetchTemperatureHumidityData, 30000);
+    const interval = setInterval(fetchTemperatureHumidityData, 300000);
 
     // Using singleton socket imported from ../socket
     socket.on('telemetry_update', (data) => {
@@ -164,7 +164,7 @@ const Temperature = () => {
                       boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                     }}
                     labelStyle={{ color: '#94a3b8', marginBottom: '4px', fontWeight: 'bold' }}
-                    labelFormatter={(label, payload) => (payload?.[0]?.payload?.isLive ? "🟢 Live" : `Time: ${label}`)}
+                    labelFormatter={(label, payload) => (payload?.[0]?.payload?.isLive ? "Live" : `Time: ${label}`)}
                   />
                   <Legend 
                     wrapperStyle={{ paddingTop: '20px' }}

@@ -19,28 +19,9 @@ const TDS = () => {
   const [isLoading, setIsLoading] = useState(false);
   const maxDataPoints = 20; // Limit the number of points shown on graph
 
-  const fetchSingleTDSData = async () => {
-    setIsLoading(true);
-    try {
-      const response = await axios.get('/get_tds');
-      const data = response.data;
-      
-      // Update current TDS value
-      if (data && data.tds_value !== undefined) {
-        const tdsValue = parseFloat(data.tds_value);
-        setCurrentTDS(isNaN(tdsValue) ? 0 : tdsValue.toFixed(1));
-        // NOTE: We no longer push this single reading into the historical chart array.
-        // Pushing random live readings into 10-minute historical data causes irregular graph intervals.
-      }
-    } catch (error) {
-      console.error("Error fetching TDS data:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
     const fetchTDSHistoryData = async () => {
+      setIsLoading(true);
       try {
         const response = await axios.get('/get_tds_history');
         const historyData = response.data;
@@ -53,14 +34,17 @@ const TDS = () => {
         setTdsData(recentData);
       } catch (error) {
         console.error("Error fetching historical TDS data:", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     fetchTDSHistoryData();
     const historyInterval = setInterval(fetchTDSHistoryData, 300000); // Chart updates every 5 mins
 
-    // Using singleton socket imported from ../socket
-    socket.on('telemetry_update', (data) => {
+    // Named handler stored in a variable so socket.off only removes THIS component's
+    // listener, not all telemetry_update listeners on the singleton socket.
+    const handleTelemetry = (data) => {
       const now = new Date().toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       if (data.ec !== null && data.ec !== undefined) {
         setCurrentTDS(parseFloat(data.ec).toFixed(1));
@@ -70,13 +54,17 @@ const TDS = () => {
           return [...withoutLive, { time: now, tds_value: data.ec, isLive: true }];
         });
       }
-    });
+    };
+
+    socket.on('telemetry_update', handleTelemetry);
 
     return () => {
       clearInterval(historyInterval);
-      socket.off('telemetry_update');
+      socket.off('telemetry_update', handleTelemetry);
     };
   }, []);
+
+
 
   // Glowing dot rendered only on the live (most recent injected) point
   const LiveDot = (props) => {

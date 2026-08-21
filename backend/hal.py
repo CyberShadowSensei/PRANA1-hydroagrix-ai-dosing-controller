@@ -28,13 +28,14 @@ PUMP_PINS = {
     4: {'in1': 26, 'in2': 27, 'en': None, 'name': 'pH DOWN'}
 }
 DHT_PIN = 5
-DHT_TYPE = "22"  # Set to "22" as per user feedback (was "11")
+DHT_TYPE = "22"  # Set to DHT22 (AM2302). Reading a DHT22 as a DHT11 causes it to return the high-bytes (1.0C and 2.0%)
 EC_CHANNEL = 0
 PH_CHANNEL = 2
 
 # --- GLOBALS & LOCKS ---
 pump_lock = threading.RLock()  # Use Reentrant Lock to allow nested calls within the same thread
 pump_status = {1: "stopped", 2: "stopped", 3: "stopped", 4: "stopped"}
+pump_permission_check = None   # Global callback to check permission, returns bool
 
 class ManualADC:
     def __init__(self, bus_num=1):
@@ -90,12 +91,21 @@ else:
 
 # DS18B20 Setup
 BASE_DIR = '/sys/bus/w1/devices/'
+_water_temp_device_path = None
+_last_device_scan_time = 0
+
 def _get_water_temp_device():
-    try:
-        devices = glob.glob(BASE_DIR + '28*')
-        return devices[0] + '/w1_slave' if devices else None
-    except Exception:
-        return None
+    global _water_temp_device_path, _last_device_scan_time
+    now = time.time()
+    if _water_temp_device_path is None or (now - _last_device_scan_time > 60):
+        _last_device_scan_time = now
+        try:
+            devices = glob.glob(BASE_DIR + '28*')
+            _water_temp_device_path = devices[0] + '/w1_slave' if devices else None
+        except Exception:
+            _water_temp_device_path = None
+    return _water_temp_device_path
+
 
 # --- SAFE STARTUP ---
 def initialize_hardware():
@@ -113,39 +123,56 @@ def initialize_hardware():
     print("DEBUG HAL: Hardware initialized. All pumps forced LOW (FAILSAFE).")
 
 # --- SENSOR ABSTRACTIONS ---
+_cached_water_temp = 25.0
+_cached_climate = (0, 25.0, "ERROR")
+
+def _poll_slow_sensors():
+    global _cached_water_temp, _cached_climate
+    while True:
+        # DS18B20 (Water Temp)
+        device_file = _get_water_temp_device()
+        if device_file:
+            try:
+                with open(device_file, 'r') as f:
+                    lines = f.readlines()
+                if lines and len(lines) >= 2 and lines[0].strip()[-3:] == 'YES':
+                    equals_pos = lines[1].find('t=')
+                    if equals_pos != -1:
+                        _cached_water_temp = float(lines[1][equals_pos+2:]) / 1000.0
+            except Exception:
+                pass
+
+        # DHT (Air Temp & Humidity)
+        if dht_sensor:
+            try:
+                humi, t = dht_sensor.read()
+                if humi is not None and t is not None:
+                    _cached_climate = (humi, t, "OK")
+                else:
+                    _cached_climate = (0, 25.0, "ERROR")
+            except Exception:
+                _cached_climate = (0, 25.0, "ERROR")
+
+        time.sleep(2.0)
+
+# Start background polling thread for slow sensors
+threading.Thread(target=_poll_slow_sensors, daemon=True).start()
+
 def get_water_temp(fallback_temp=25.0):
-    # Dynamic DS18B20 detection on every read to support unplugging/replacing without reboots
-    device_file = _get_water_temp_device()
-    if not device_file:
-        return fallback_temp
-    try:
-        with open(device_file, 'r') as f:
-            lines = f.readlines()
-        if not lines or len(lines) < 2:
-            return fallback_temp
-        if lines[0].strip()[-3:] != 'YES':
-            return fallback_temp
-        equals_pos = lines[1].find('t=')
-        if equals_pos != -1:
-            return float(lines[1][equals_pos+2:]) / 1000.0
-    except Exception:
-        return fallback_temp
+    global _cached_water_temp
+    # Return immediately (non-blocking)
+    if _cached_water_temp != 25.0:
+        return _cached_water_temp
     return fallback_temp
 
 def get_climate():
-    """Returns (humidity, temperature, status)"""
-    if not dht_sensor: return 0, 25.0, "ERROR"
-    try:
-        humi, t = dht_sensor.read()
-        if humi is None or t is None: return 0, 25.0, "ERROR"
-        return humi, t, "OK"
-    except Exception as e:
-        print(f"DEBUG HAL: DHT reading failed: {e}")
-        return 0, 25.0, "ERROR"
+    """Returns (humidity, temperature, status) instantly from cache"""
+    global _cached_climate
+    return _cached_climate
 
 def get_stable_reading(channel):
     """
-    Reads 50 rapid samples from the ADC, discards outliers.
+    Reads 25 rapid samples from the ADC, discards outliers.
     Guards against empty lists to avoid ZeroDivisionError.
     """
     if adc is None: return 0
@@ -154,20 +181,21 @@ def get_stable_reading(channel):
         raise ValueError(f"Invalid ADC channel: {channel}")
 
     readings = []
-    for _ in range(50):
+    for _ in range(25):
         raw = adc.read(channel)
         if raw is not None:
             readings.append(raw)
-        time.sleep(0.002)
+        time.sleep(0.001)
         
-    if len(readings) < 20: 
+    if len(readings) < 10: 
         raise ValueError(f"I2C Communication Failure on channel {channel}")
         
     readings.sort()
-    clean = readings[10:-10] # Drop top/bottom 10 outliers
+    clean = readings[5:-5] # Drop top/bottom 5 outliers
     
     if not clean:
         clean = readings  # Fallback to raw readings if trimmed list is empty to prevent crashes
+
         
     if not clean:
         raise ValueError(f"No valid readings obtained on channel {channel}")
@@ -177,6 +205,10 @@ def get_stable_reading(channel):
 # --- PUMP ABSTRACTIONS ---
 def pump_start(pump_id):
     if not HARDWARE_AVAILABLE: return
+    if pump_permission_check is not None:
+        if not pump_permission_check(pump_id):
+            print(f"DEBUG HAL: Pump {pump_id} start blocked by safety check.")
+            return
     pins = PUMP_PINS.get(pump_id)
     if not pins: return
     with pump_lock:

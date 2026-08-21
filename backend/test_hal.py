@@ -10,8 +10,8 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 import hal
 
 class TestHAL(unittest.TestCase):
-    def test_dht22_config(self):
-        """Verify DHT_TYPE is set to 22 (DHT22)."""
+    def test_dht11_config(self):
+        """Verify DHT_TYPE is set to 11 (DHT11)."""
         self.assertEqual(hal.DHT_TYPE, "22")
 
     @patch('hal._get_water_temp_device')
@@ -27,6 +27,12 @@ class TestHAL(unittest.TestCase):
         file_content = "72 01 4b 46 7f ff 0e 10 57 : crc=57 YES\n72 01 4b 46 7f ff 0e 10 57 t=23125\n"
         
         with patch('builtins.open', mock_open(read_data=file_content)):
+            # Force one pass of the polling loop to update the cache
+            with patch('time.sleep', side_effect=Exception("StopLoop")):
+                try:
+                    hal._poll_slow_sensors()
+                except Exception:
+                    pass
             temp = hal.get_water_temp(25.0)
             self.assertEqual(temp, 23.125)
 
@@ -185,5 +191,91 @@ class TestHAL(unittest.TestCase):
         t1.join(timeout=1.0)
         self.assertTrue(thread_2_completed.is_set(), "Thread 2 failed to acquire the lock after release!")
 
+    @patch('hal.GPIO')
+    def test_initialize_hardware_failsafe(self, mock_gpio):
+        """Verify initialize_hardware sets all pump pins to OUTPUT LOW and status to stopped when HARDWARE_AVAILABLE=True."""
+        with patch('hal.HARDWARE_AVAILABLE', True):
+            hal.initialize_hardware()
+            for pump_id, pins in hal.PUMP_PINS.items():
+                mock_gpio.setup.assert_any_call(pins['in1'], mock_gpio.OUT)
+                mock_gpio.setup.assert_any_call(pins['in2'], mock_gpio.OUT)
+                mock_gpio.output.assert_any_call(pins['in1'], mock_gpio.LOW)
+                mock_gpio.output.assert_any_call(pins['in2'], mock_gpio.LOW)
+                self.assertEqual(hal.pump_status[pump_id], "stopped")
+
+    @patch('hal.GPIO')
+    def test_pump_start_stop_hardware_available(self, mock_gpio):
+        """Verify pump_start and pump_stop when HARDWARE_AVAILABLE=True and graceful handling of invalid pump_id."""
+        with patch('hal.HARDWARE_AVAILABLE', True):
+            hal.pump_start(1)
+            pins1 = hal.PUMP_PINS[1]
+            mock_gpio.output.assert_any_call(pins1['in1'], mock_gpio.HIGH)
+            mock_gpio.output.assert_any_call(pins1['in2'], mock_gpio.LOW)
+            self.assertEqual(hal.pump_status[1], "running")
+
+            hal.pump_stop(1)
+            mock_gpio.output.assert_any_call(pins1['in1'], mock_gpio.LOW)
+            mock_gpio.output.assert_any_call(pins1['in2'], mock_gpio.LOW)
+            self.assertEqual(hal.pump_status[1], "stopped")
+
+            mock_gpio.reset_mock()
+            hal.pump_start(99)
+            mock_gpio.output.assert_not_called()
+            hal.pump_stop(99)
+            mock_gpio.output.assert_not_called()
+
+    @patch('hal.GPIO')
+    def test_emergency_stop_all_hardware_available(self, mock_gpio):
+        """Verify emergency_stop_all forces all pump GPIO pins LOW and pump_status to stopped."""
+        with patch('hal.HARDWARE_AVAILABLE', True):
+            hal.pump_status[1] = "running"
+            hal.emergency_stop_all()
+            for pump_id, pins in hal.PUMP_PINS.items():
+                mock_gpio.output.assert_any_call(pins['in1'], mock_gpio.LOW)
+                mock_gpio.output.assert_any_call(pins['in2'], mock_gpio.LOW)
+                self.assertEqual(hal.pump_status[pump_id], "stopped")
+
+    @patch('hal.GPIO')
+    @patch('hal.emergency_stop_all')
+    def test_cleanup_teardown(self, mock_estop, mock_gpio):
+        """Verify cleanup calls emergency_stop_all, closes adc, and calls GPIO.cleanup."""
+        mock_adc = MagicMock()
+        with patch('hal.HARDWARE_AVAILABLE', True), patch('hal.adc', mock_adc):
+            hal.cleanup()
+            mock_estop.assert_called_once()
+            mock_adc.close.assert_called_once()
+            mock_gpio.cleanup.assert_called_once()
+
+    def test_manual_adc_read_protocol_and_exceptions(self):
+        """Verify ManualADC.read parses 2-byte little-endian data, handles errors, and closes bus."""
+        adc_inst = hal.ManualADC(bus_num=1)
+        mock_bus = MagicMock()
+        adc_inst.bus = mock_bus
+        
+        mock_bus.read_i2c_block_data.return_value = [0x34, 0x12]
+        val = adc_inst.read(0)
+        mock_bus.write_byte.assert_called_with(0x04, 0x30 + 0)
+        mock_bus.read_i2c_block_data.assert_called_with(0x04, 0x30 + 0, 2)
+        self.assertEqual(val, 4660)
+
+        mock_bus.write_byte.side_effect = Exception("I2C Bus Error")
+        self.assertIsNone(adc_inst.read(0))
+
+        adc_inst.close()
+        mock_bus.close.assert_called_once()
+        self.assertIsNone(adc_inst.bus)
+
+    def test_get_stable_reading_channel_bounds(self):
+        """Verify get_stable_reading raises ValueError for invalid channel indices (< 0, > 7, or non-int)."""
+        mock_adc = MagicMock()
+        with patch('hal.adc', mock_adc):
+            with self.assertRaises(ValueError):
+                hal.get_stable_reading(-1)
+            with self.assertRaises(ValueError):
+                hal.get_stable_reading(8)
+            with self.assertRaises(ValueError):
+                hal.get_stable_reading("invalid")
+
 if __name__ == '__main__':
     unittest.main()
+

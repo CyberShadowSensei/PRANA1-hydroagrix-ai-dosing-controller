@@ -1,5 +1,5 @@
 import React from "react";
-import GaugeChart from "react-gauge-chart";
+import SmoothGauge from "./SmoothGauge";
 
 const TDSGauge = ({ value, time }) => {
   // Ensure value is within 0-15 range
@@ -19,22 +19,10 @@ const TDSGauge = ({ value, time }) => {
       
       <div className="flex-1 flex flex-col items-center justify-center relative">
         <div className="relative w-48">
-          <GaugeChart
-            id="ec-gauge"
-            nrOfLevels={20}
-            // 0-1 (yellow/low): ~7% of gauge
-            // 1-3 (green/optimal): ~13% of gauge
-            // 3-15 (red/high): ~80% of gauge
+          <SmoothGauge
+            percent={percentValue}
             arcsLength={[0.07, 0.13, 0.8]}
             colors={["#FFDD00", "#00FF44", "#FF0F0F"]}
-            percent={percentValue}
-            arcWidth={0.12}
-            arcPadding={0.02}
-            needleColor="#E2E8F0"
-            needleBaseColor="#475569"
-            textColor="transparent"
-            formatTextValue={() => ""}
-            cornerRadius={5}
           />
         </div>
 

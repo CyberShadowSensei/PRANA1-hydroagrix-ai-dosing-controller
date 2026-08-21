@@ -1,7 +1,11 @@
 import os
 import sys
+import time
+import threading
 import pytest
 from unittest.mock import patch, MagicMock
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
 # Mock hardware dependencies before importing app
 sys.modules['smbus2'] = MagicMock()
@@ -13,24 +17,43 @@ sys.modules['RPi.GPIO'] = MagicMock()
 import hal
 from config import app, db
 from models import SensorLimits, EventLog
+from sensors import sensor_monitor
 from routes import *
 
 @pytest.fixture
 def client():
     app.config['TESTING'] = True
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'poolclass': StaticPool,
+        'connect_args': {'check_same_thread': False}
+    }
     
     with app.test_client() as client:
         with app.app_context():
+            db.engine.dispose()
+            engine = create_engine(
+                'sqlite:///:memory:',
+                poolclass=StaticPool,
+                connect_args={'check_same_thread': False}
+            )
+            if hasattr(db, '_app_engines') and app in db._app_engines:
+                db._app_engines[app][None] = engine
+            elif hasattr(db, 'engines'):
+                db.engines[None] = engine
             db.create_all()
             yield client
             db.session.remove()
-            db.drop_all()
+            try:
+                db.drop_all()
+            except Exception:
+                pass
+            db.engine.dispose()
 
 def test_get_sensor_limits_empty(client):
     response = client.get('/sensor/limits')
     assert response.status_code == 200
-    assert response.json == {}
+    assert "auto_mode" in response.json
 
 def test_post_sensor_limits(client):
     payload = {
@@ -39,7 +62,7 @@ def test_post_sensor_limits(client):
     }
     response = client.post('/sensor/limits', json=payload)
     assert response.status_code == 200
-    assert response.json == {"message": "Saved"}
+    assert response.json.get("message") == "Saved"
 
     response = client.get('/sensor/limits')
     data = response.json
@@ -53,17 +76,16 @@ def test_post_sensor_limits(client):
     assert data["tds"]["active"] is False
 
 @patch('hal.pump_start')
-@patch('routes.log_pump_action')
 @patch('threading.Thread')
-def test_pump_start(mock_thread, mock_log, mock_start, client):
+def test_pump_start(mock_thread, mock_start, client):
     response = client.post('/pump/1/start', json={"duration": 10})
     assert response.status_code == 200
     assert response.json == {"message": "OK"}
     mock_start.assert_called_once_with(1)
-    mock_log.assert_called_once_with(1, 10, "Manual")
     mock_thread.assert_called_once()
 
 @patch('hal.pump_stop')
+@patch('hal.pump_status', {1: 'running'})
 def test_pump_stop(mock_stop, client):
     response = client.post('/pump/1/stop')
     assert response.status_code == 200
@@ -71,22 +93,21 @@ def test_pump_stop(mock_stop, client):
     mock_stop.assert_called_once_with(1)
 
 @patch('hal.pump_start')
-@patch('routes.log_pump_action')
 @patch('threading.Thread')
-def test_pump_all_start(mock_thread, mock_log, mock_start, client):
+def test_pump_all_start(mock_thread, mock_start, client):
     response = client.post('/pump/all/start', json={"duration": 5})
     assert response.status_code == 200
     assert response.json["message"] == "All pumps started"
     assert mock_start.call_count == len(hal.PUMP_PINS)
-    assert mock_log.call_count == len(hal.PUMP_PINS)
     assert mock_thread.call_count == len(hal.PUMP_PINS)
 
-@patch('hal.emergency_stop_all')
-def test_pump_all_stop(mock_stop_all, client):
+@patch('hal.pump_stop')
+@patch('hal.pump_status', {1: 'running', 2: 'running', 3: 'running', 4: 'running'})
+def test_pump_all_stop(mock_stop, client):
     response = client.post('/pump/all/stop')
     assert response.status_code == 200
     assert response.json == {"message": "All pumps stopped", "status": "stopped"}
-    mock_stop_all.assert_called_once()
+    assert mock_stop.call_count == len(hal.PUMP_PINS)
 
 def test_api_live_gauges(client):
     response = client.get('/api/live_gauges')
@@ -108,3 +129,79 @@ def test_get_event_logs(client):
     assert "event_logs" in data
     assert len(data["event_logs"]) == 1
     assert data["event_logs"][0]["event_id"] == "TEST_EVENT"
+
+
+def test_camera_task_lifecycle_decoupled():
+    from config import socketio
+    from main import handle_connect
+    with patch.object(socketio, 'start_background_task') as mock_start_task:
+        handle_connect()
+        mock_start_task.assert_not_called()
+
+
+def test_send_report_email_fast_response(client):
+    spawned_threads = []
+    real_thread = threading.Thread
+
+    def custom_thread(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        spawned_threads.append(t)
+        return t
+
+    with patch('threading.Thread', side_effect=custom_thread):
+        with patch.object(sensor_monitor, 'send_report', return_value=(True, "Success")):
+            start = time.perf_counter()
+            response = client.post('/send_report_email')
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            assert response.status_code == 200
+            assert response.json == {"message": "Report email generation and sending started in background."}
+            assert elapsed_ms < 50.0
+
+            for t in spawned_threads:
+                t.join(timeout=3.0)
+
+
+def test_send_report_email_background_success(client):
+    spawned_threads = []
+    real_thread = threading.Thread
+
+    def custom_thread(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        spawned_threads.append(t)
+        return t
+
+    with patch('threading.Thread', side_effect=custom_thread):
+        with patch.object(sensor_monitor, 'send_report', return_value=(True, "Success")) as mock_send:
+            response = client.post('/send_report_email')
+            assert response.status_code == 200
+            assert response.json == {"message": "Report email generation and sending started in background."}
+
+            for t in spawned_threads:
+                t.join(timeout=3.0)
+
+            mock_send.assert_called_once()
+
+
+def test_send_report_email_background_failure_logs_event(client):
+    spawned_threads = []
+    real_thread = threading.Thread
+
+    def custom_thread(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        spawned_threads.append(t)
+        return t
+
+    with patch('threading.Thread', side_effect=custom_thread):
+        with patch.object(sensor_monitor, 'send_report', return_value=(False, "SMTP connection error")):
+            response = client.post('/send_report_email')
+            assert response.status_code == 200
+            assert response.json == {"message": "Report email generation and sending started in background."}
+
+            for t in spawned_threads:
+                t.join(timeout=3.0)
+
+            with app.app_context():
+                logs = EventLog.query.filter_by(event_id="EMAIL_ERROR", category="ERROR").all()
+                assert len(logs) > 0
+                assert "SMTP connection error" in logs[0].message
+
