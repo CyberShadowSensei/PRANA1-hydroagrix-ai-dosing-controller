@@ -1,4 +1,4 @@
-# Hydroagrix AI Dosing Controller - Complete System Documentation
+# Prana 1 - Complete System Documentation
 
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
 > **Last Updated:** August 2026  
@@ -24,7 +24,7 @@
 
 ## 1. System Overview & High-Level Architecture
 
-The **Hydroagrix AI Dosing Controller** is an automated, closed-loop hydroponic nutrient and pH management platform engineered for Raspberry Pi / Seeed reTerminal embedded hardware. 
+**Prana 1** is an automated, closed-loop hydroponic nutrient and pH management platform engineered for Raspberry Pi / Seeed reTerminal embedded hardware. 
 
 The system operates in two primary modes:
 - **Autonomous Mode**: The system monitors pH and Electrical Conductivity (EC / TDS) and automatically drives 4 peristaltic pumps to maintain target chemical ranges defined by crop growth presets. The scheduled grow cycle progression dictates active dosing limits and phase transitions, while an edge vision model periodically analyzes leaf coverage to classify growth stages for informational monitoring.
