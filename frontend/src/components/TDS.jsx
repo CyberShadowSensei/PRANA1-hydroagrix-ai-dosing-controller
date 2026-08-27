@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import socket from "../socket";
+import CirculationBadge from "./ui/CirculationBadge";
 import {
   LineChart,
   Line,
@@ -121,15 +122,9 @@ const TDS = () => {
                 </span>
                 <span className="text-2xl font-medium text-slate-500 uppercase tracking-widest">mS/cm</span>
               </div>
-              {isDrainCycle && (
-                <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-xs font-semibold shadow-sm">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-                  </span>
-                  Channel Circulation Active (Holding Plateau &amp; Dosing Paused)
-                </div>
-              )}
+              <div className="mt-4">
+                <CirculationBadge isDrainCycle={isDrainCycle} isStablePlateau={!isDrainCycle} plateauEc={currentTDS} />
+              </div>
               <p className="text-slate-500 mt-6 text-sm max-w-md">
                 Electrical Conductivity (EC) measures the amount of dissolved salts (nutrients) in the water. Keep this within the plant's optimal range for maximum growth.
               </p>

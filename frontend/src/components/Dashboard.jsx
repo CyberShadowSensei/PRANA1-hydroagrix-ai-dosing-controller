@@ -18,6 +18,7 @@ import TDSGauge from "../components/ui/TDSGauge";
 import Gauge from "../components/ui/gauge";
 import PumpLogs from "./PumpLogs";
 import GrowCycleBanner from "./ui/GrowCycleBanner";
+import CirculationBadge from "./ui/CirculationBadge";
 import { HiExclamationCircle } from "react-icons/hi";
 import TankLevels from "./TankLevels";
 
@@ -468,6 +469,10 @@ const Dashboard = () => {
            onToggleMode={handleToggleMode} 
            onRefresh={fetchGrowCycleStatus}
         />
+
+        <div className="mb-6">
+          <CirculationBadge isDrainCycle={isDrainCycle} isStablePlateau={!isDrainCycle} plateauEc={currentTDS.value} />
+        </div>
 
         {activeWarnings.length > 0 && (
           <div className="mb-8">
