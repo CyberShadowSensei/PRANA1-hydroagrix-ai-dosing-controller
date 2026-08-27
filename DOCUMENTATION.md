@@ -34,38 +34,50 @@ The system operates in two primary modes:
 
 ```mermaid
 graph TD
-    subgraph Hardware Layer
-        A[EC Sensor Ch 0] -->|I2C SMBus 0x04| C[ManualADC]
-        B[pH Sensor Ch 2] -->|I2C SMBus 0x04| C
-        D[DS18B20 Water Temp] -->|1-Wire /sys/bus/w1| E[Slow Sensors Poller]
-        F[DHT22 Air Climate] -->|GPIO BCM 5| E
-        G[USB Camera] -->|/dev/video0 V4L2| H[OpenCV Camera Worker]
-        I[4x Peristaltic Pumps] <--|GPIO BCM Pins 18-27| J[L298N H-Bridge Driver]
+    subgraph Hardware_Layer ["Hardware Layer"]
+        ADC["ManualADC (I2C 0x04)"] -->|Ch 0| EC["EC / TDS Sensor"]
+        ADC -->|Ch 2| PH["pH Sensor"]
+        DS18B20["DS18B20 (1-Wire /sys/bus/w1)"] --> Temp["Water Temp Probe"]
+        DHT22["DHT22 (GPIO BCM 5)"] --> Climate["Air Temp & Humidity"]
+        CAM["USB Camera (/dev/video0)"] --> Vision["V4L2 OpenCV Capture"]
+        L298N["L298N H-Bridge Drivers"] -->|GPIO 18-27 BCM| Pumps["4x Peristaltic Pumps"]
     end
 
-    subgraph Backend Engine Flask / Socket.IO
-        C --> K[sensors.py Telemetry Engine]
-        E --> K
-        K --> L[main.py 500ms Fetch Loop]
-        L --> M[dosing.py Adaptive Control Engine]
-        M -->|hal.pump_start / stop| J
-        H --> N[camera_ml.py Vision Classifier]
-        N -->|Phase Transition| M
-        L -->|Socket.IO telemetry_update| O[Web Clients]
-        H -->|Socket.IO camera_frame| O
-        M --> P[(SQLite DB mydatabase.db)]
-        L -->|10-Min Aggregation| P
+    subgraph Backend_Subsystem ["Backend Subsystem (Python 3.10 / Flask / Socket.IO)"]
+        HAL["hal.py (Hardware Abstraction Layer)"] --> ADC
+        HAL --> DS18B20
+        HAL --> DHT22
+        HAL --> Pumps
+
+        SensorsEngine["sensors.py (Piecewise Calibration & CirculationPlateauTracker)"] --> HAL
+        
+        FetchLoop["main.py (500ms Daemon Fetch Loop)"] --> SensorsEngine
+        FetchLoop --> DosingEngine["dosing.py (Adaptive Control & Cooldown)"]
+        
+        DosingEngine -->|Pump Trigger / Emergency Halt| HAL
+        DosingEngine --> DB[("SQLite DB (mydatabase.db)")]
+
+        CameraML["camera_ml.py (HSV / YOLO Crop Growth Classifier)"] --> CAM
+        GrowHelper["grow_cycle_helper.py (Cycle Day & Phase Progression)"] --> DosingEngine
+
+        RestAPI["routes.py (Flask REST API Endpoints)"] --> DB
+        RestAPI --> HAL
+        RestAPI --> GrowHelper
+
+        FetchLoop -->|Live Telemetry / Video Frames| SocketIO["Flask-SocketIO Server"]
+        CameraML -->|Frame Streaming| SocketIO
     end
 
-    subgraph Frontend Single Page App React + Vite
-        O <--> Q[socket.js Singleton]
-        Q --> R[Dashboard UI & HUD]
-        Q --> S[Plant Presets Manager]
-        Q --> T[Manual Pump Controls]
-        R -->|HTTP REST APIs| U[routes.py API Layer]
-        S -->|HTTP REST APIs| U
-        T -->|HTTP REST APIs| U
-        U --> P
+    subgraph Frontend_Subsystem ["Frontend Subsystem (React / Vite / Tailwind)"]
+        SocketClient["socket.js Singleton (Socket.IO-Client)"] --> SocketIO
+        
+        Dashboard["Dashboard UI (Live Gauges & HUD)"] --> SocketClient
+        Dashboard --> RestAPI
+
+        PresetsManager["Plant Presets Manager"] --> RestAPI
+        PumpControls["Manual Pump Controls & Priming"] --> RestAPI
+        SettingsUI["System Config & Calibrations"] --> RestAPI
+        HistoryUI["Historical Analytics & Charts"] --> RestAPI
     end
 ```
 
