@@ -60,6 +60,9 @@ def fetch_loop():
                 current_telemetry = {
                     'ph': ph_res.get('ph_value'),
                     'ec': tds_res.get('tds_value'),
+                    'effective_ec': tds_res.get('effective_tds', tds_res.get('tds_value')),
+                    'is_drain_cycle': tds_res.get('is_drain_cycle', False),
+                    'is_stable_plateau': tds_res.get('is_stable_plateau', True),
                     'temperature': th_res.get('temperature'),
                     'humidity': th_res.get('humidity'),
                     'pumps': {f"pump{k}": v for k, v in hal.pump_status.items()}
@@ -76,6 +79,7 @@ def fetch_loop():
                     if (current_telemetry['pumps'] != last['pumps'] or
                         current_telemetry['ph'] != last['ph'] or
                         current_telemetry['ec'] != last['ec'] or
+                        current_telemetry['is_drain_cycle'] != last.get('is_drain_cycle') or
                         current_telemetry['temperature'] != last['temperature'] or
                         current_telemetry['humidity'] != last['humidity']):
                         should_emit = True
@@ -118,10 +122,13 @@ def aggregation_loop():
                         air_temp=round(tot_a / n, 2)
                     ))
                 if live_tds_data:
-                    n = len(live_tds_data)
+                    # Filter out drain cycle dips so 10-minute DB average represents true submerged nutrient concentration
+                    submerged_tds = [d for d in live_tds_data if d.get("status") == "OK" and not d.get("is_drain_cycle")]
+                    target_tds_data = submerged_tds if submerged_tds else list(live_tds_data)
+                    n = len(target_tds_data)
                     tot_tds, tot_w, tot_a = 0.0, 0.0, 0.0
-                    for d in live_tds_data:
-                        tot_tds += d["value"]
+                    for d in target_tds_data:
+                        tot_tds += d.get("effective_value", d["value"])
                         tot_w += d.get("water_temp", 25.0)
                         tot_a += d.get("air_temp", 25.0)
                     db.session.add(TDSData(
@@ -156,41 +163,53 @@ def process_email_backlog_items():
         from email.utils import formatdate, make_msgid
         import smtplib
 
-        # Discard older than 24 hours
-        cutoff = datetime.utcnow() - timedelta(hours=24)
-        EmailBacklog.query.filter(EmailBacklog.created_at < cutoff).delete(synchronize_session=False)
+        # Discard daily digest/reports older than 24 hours, and operational alerts older than 1 hour
+        cutoff_reports = datetime.utcnow() - timedelta(hours=24)
+        cutoff_alerts = datetime.utcnow() - timedelta(hours=1)
+        
+        EmailBacklog.query.filter(EmailBacklog.alert_type == 'REPORT', EmailBacklog.created_at < cutoff_reports).delete(synchronize_session=False)
+        EmailBacklog.query.filter(db.or_(EmailBacklog.alert_type != 'REPORT', EmailBacklog.alert_type == None), EmailBacklog.created_at < cutoff_alerts).delete(synchronize_session=False)
         db.session.commit()
 
         # Fetch pending emails
         pending_emails = EmailBacklog.query.order_by(EmailBacklog.created_at.asc()).all()
         if pending_emails:
-            # Reuse the existing sensor_monitor singleton from sensors.py instead of
-            # constructing a new SensorMonitor() — which reads email_config.json from
-            # disk on every invocation (every 60 seconds).
+            items_to_process = []
+            for item in pending_emails:
+                items_to_process.append({
+                    'id': item.id,
+                    'subject': item.subject,
+                    'recipients': item.recipients,
+                    'body_text': item.body_text,
+                    'body_html': item.body_html,
+                    'created_at': item.created_at
+                })
+            db.session.rollback() # Close the read transaction
+
             from sensors import sensor_monitor as _monitor
             email_config = _monitor.email_config
             
             if email_config.get('sender_email') != 'placeholder@gmail.com':
-                for backlog_item in pending_emails:
+                for backlog_item in items_to_process:
                     try:
                         msg = MIMEMultipart('mixed')
-                        msg['From'] = email_config['sender_email']
+                        msg['From'] = email_config.get('sender_email')
                         msg['Date'] = formatdate(localtime=True)
                         msg['Message-ID'] = make_msgid()
-                        recipients = [r.strip() for r in backlog_item.recipients.split(',') if r.strip()]
+                        recipients = [r.strip() for r in backlog_item['recipients'].split(',') if r.strip()]
                         msg['To'] = ", ".join(recipients)
                         from email.header import Header
-                        msg['Subject'] = Header(backlog_item.subject, 'utf-8')
+                        msg['Subject'] = Header(backlog_item['subject'], 'utf-8')
 
-                        delay_note = f"\n\n[NOTE: This is a delayed message originally generated at {backlog_item.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}]"
-                        plain_text = backlog_item.body_text + delay_note
+                        delay_note = f"\n\n[NOTE: This is a delayed message originally generated at {backlog_item['created_at'].strftime('%Y-%m-%d %H:%M:%S UTC')}]"
+                        plain_text = backlog_item['body_text'] + delay_note
                         
                         alt_part = MIMEMultipart('alternative')
                         alt_part.attach(MIMEText(plain_text, 'plain'))
                         
-                        if backlog_item.body_html:
-                            html_delay_note = f"<br><br><div style='color: #fbbf24; font-size: 12px;'>[NOTE: This is a delayed message originally generated at {backlog_item.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}]</div>"
-                            html_body = backlog_item.body_html
+                        if backlog_item['body_html']:
+                            html_delay_note = f"<br><br><div style='color: #fbbf24; font-size: 12px;'>[NOTE: This is a delayed message originally generated at {backlog_item['created_at'].strftime('%Y-%m-%d %H:%M:%S UTC')}]</div>"
+                            html_body = backlog_item['body_html']
                             if '</body>' in html_body:
                                 html_body = html_body.replace('</body>', html_delay_note + '</body>')
                             else:
@@ -205,16 +224,21 @@ def process_email_backlog_items():
                             server.send_message(msg, to_addrs=recipients)
                         
                         # Send successful, delete from backlog
-                        db.session.delete(backlog_item)
+                        EmailBacklog.query.filter_by(id=backlog_item['id']).delete()
+                        db.session.commit()
+                    except smtplib.SMTPResponseException as e:
+                        print(f"SMTP response error sending backlogged email {backlog_item['id']}: {e}. Removing item from queue.")
+                        # 5xx error (e.g. 550 rate limit) - log, delete item, and continue queue
+                        EmailBacklog.query.filter_by(id=backlog_item['id']).delete()
                         db.session.commit()
                     except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError) as e:
-                        print(f"Network/Connection error sending backlogged email {backlog_item.id}: {e}")
+                        print(f"Network/Connection error sending backlogged email {backlog_item['id']}: {e}")
                         # Connection or server connectivity failure - break loop to retry entire queue later
                         break
                     except Exception as e:
-                        print(f"Recipient or message error sending backlogged email {backlog_item.id}: {e}. Removing item from queue.")
+                        print(f"Recipient or message error sending backlogged email {backlog_item['id']}: {e}. Removing item from queue.")
                         # Bad recipient / invalid message format / 5xx error - log, delete item, and continue queue
-                        db.session.delete(backlog_item)
+                        EmailBacklog.query.filter_by(id=backlog_item['id']).delete()
                         db.session.commit()
 
 def email_backlog_loop():

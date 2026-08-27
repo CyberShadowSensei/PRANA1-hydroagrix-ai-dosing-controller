@@ -1,3 +1,4 @@
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -314,7 +315,15 @@ class SensorMonitor:
         try:
             from config import app, db
             from models import EventLog
+            from sqlalchemy import text
             with app.app_context():
+                # Cap EventLog to 5,000 records to prevent table bloat and lock contention
+                count = EventLog.query.count()
+                if count >= 5000:
+                    db.session.execute(text(
+                        'DELETE FROM event_log WHERE id IN '
+                        '(SELECT id FROM event_log ORDER BY timestamp ASC LIMIT 500)'
+                    ))
                 details_str = json.dumps(details) if details else None
                 db.session.add(EventLog(
                     event_id=event_id,
@@ -324,7 +333,18 @@ class SensorMonitor:
                 ))
                 db.session.commit()
         except Exception as e:
+            try:
+                from config import db
+                db.session.rollback()
+            except Exception:
+                pass
             print(f"DEBUG: Failed to save DB log: {e}")
+        finally:
+            try:
+                from config import db
+                db.session.remove()
+            except Exception:
+                pass
 
     DEADBANDS = {
         'temperature': 1.0,   # °C

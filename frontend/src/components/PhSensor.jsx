@@ -22,30 +22,31 @@ const PHSensor = () => {
   const [isLoading, setIsLoading] = useState(false);
   const maxDataPoints = 20; // Limit the number of points shown on graph
 
+  // Lifted outside useEffect so the refresh button can call it too
+  const fetchPHHistoryData = async () => {
+    setIsLoading(true);
+    try {
+      const response = await axios.get('/get_ph_history');
+      const data = response.data;
+      const formattedData = (data.ph_data || []).map((item) => {
+        const phValue = parseFloat(item.ph_value);
+        return {
+          time: item.timestamp,
+          value: isNaN(phValue) ? 0 : parseFloat(phValue.toFixed(2)),
+          state: getPHState(isNaN(phValue) ? 0 : phValue)
+        };
+      });
+
+      const recentData = formattedData.slice(-maxDataPoints);
+      setPHData(recentData);
+    } catch (error) {
+      console.error("Error fetching historical PH data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchPHHistoryData = async () => {
-      setIsLoading(true);
-      try {
-        const response = await axios.get('/get_ph_history');
-        const data = response.data;
-        const formattedData = (data.ph_data || []).map((item) => {
-          const phValue = parseFloat(item.ph_value);
-          return {
-            time: item.timestamp,
-            value: isNaN(phValue) ? 0 : parseFloat(phValue.toFixed(2)),
-            state: getPHState(isNaN(phValue) ? 0 : phValue)
-          };
-        });
-
-        const recentData = formattedData.slice(-maxDataPoints);
-        setPHData(recentData);
-      } catch (error) {
-        console.error("Error fetching historical PH data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchPHHistoryData();
     const historyInterval = setInterval(fetchPHHistoryData, 300000); // Chart updates every 5 mins
 
@@ -114,7 +115,7 @@ const PHSensor = () => {
           </div>
           
           <button 
-            onClick={fetchPHData}
+            onClick={fetchPHHistoryData}
             disabled={isLoading}
             className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 border border-emerald-500/30 hover:border-emerald-500 text-emerald-400 font-bold transition-all active:scale-95 disabled:opacity-50 group shadow-lg shadow-emerald-900/10"
           >

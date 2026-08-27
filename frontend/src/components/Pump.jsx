@@ -123,8 +123,10 @@ const Pump = (props) => {
     fetchPumpStatus();
     fetchLimits();
     socket.on('grow_cycle_update', fetchLimits);
+    socket.on('pump_status_update', setPumpStatus);
     return () => {
       socket.off('grow_cycle_update', fetchLimits);
+      socket.off('pump_status_update', setPumpStatus);
     };
   }, []);
 
@@ -335,7 +337,7 @@ const Pump = (props) => {
             </div>
           </div>
 
-        <div className="flex flex-col lg:flex-row gap-8">
+        <div className="flex flex-col lg:flex-row gap-8 mt-6">
           {/* Sensor Limits Panel */}
           <div className="w-full lg:w-1/2">
             <div className="bg-gradient-to-br from-slate-800/90 via-slate-900/90 to-slate-800/90 rounded-xl p-6 shadow-lg border border-slate-700/30 backdrop-blur-sm text-white h-full">
@@ -366,13 +368,13 @@ const Pump = (props) => {
               </div>
 
               {!isAutoMode ? (
-                <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <div className="mb-6 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
                   <div className="flex items-start">
-                    <HiOutlineInformationCircle className="w-5 h-5 text-amber-400 mr-2 mt-0.5" />
+                    <HiOutlineInformationCircle className="w-5 h-5 text-blue-400 mr-2 mt-0.5" />
                     <div>
-                      <p className="text-sm font-medium text-amber-400">Manual Mode Active</p>
+                      <p className="text-sm font-medium text-blue-400">Manual Limits Mode Active</p>
                       <p className="text-xs text-slate-300 mt-1">
-                        Sensor limits and autonomous dosing are disabled. Pumps must be controlled manually.
+                        Automated dosing is active using the sensor limits configured below. Plant preset limits are not applied — enable the sensors you want monitored and set your target ranges. Pumps will fire automatically when readings fall outside those bounds.
                       </p>
                     </div>
                   </div>

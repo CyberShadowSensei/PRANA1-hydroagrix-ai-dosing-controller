@@ -184,28 +184,34 @@ def test_presets_crud(client):
 
 @patch('camera_ml.cv2')
 @patch('camera_ml.get_latest_frame')
-@patch('camera_ml.time.sleep', side_effect=[None, RuntimeError("Stop thread")])
 @patch('config.socketio.emit')
-def test_camera_ml_stage_transition_emit(mock_emit, mock_sleep, mock_get_frame, mock_cv2, client):
+def test_camera_ml_stage_transition_emit(mock_emit, mock_get_frame, mock_cv2, client):
+    """
+    Tests that plant_monitor_thread emits grow_cycle_update and advances stage.
+    
+    NOTE: We do NOT patch camera_ml.time.sleep with a list side_effect — lists get
+    exhausted and raise StopIteration (which becomes a RuntimeError in some contexts)
+    when other tests in the suite have caused extra inner sleep(0.01) calls to fire
+    before the outer sleep(86400) is reached. Instead, plant_monitor_running is set
+    to False after the first iteration to stop the loop naturally.
+    """
     import numpy as np
     from datetime import datetime
     import camera_ml
     from camera_ml import plant_monitor_thread
-    
-    camera_ml.plant_monitor_running = True
-    
+
     mock_cv2.COLOR_BGR2GRAY = 6
     mock_cv2.COLOR_BGR2HSV = 40
     mock_cv2.cvtColor.side_effect = lambda f, code: np.full((480, 640), 100, dtype=np.uint8) if code == 6 else np.full((480, 640, 3), 50, dtype=np.uint8)
     mock_cv2.inRange.return_value = np.ones((480, 640), dtype=np.uint8) * 255
-    
+
     # Setup active plant with state=True
     status = PlantStageStatus.query.first()
     status.plant_name = "Tomato"
     status.plant_stage = "Seedling"
     status.state = True
     status.cycle_start_date = datetime.utcnow()
-    
+
     preset = PlantPreset(
         name="Tomato",
         image_url="/images/logo.jpg",
@@ -217,16 +223,26 @@ def test_camera_ml_stage_transition_emit(mock_emit, mock_sleep, mock_get_frame, 
     )
     db.session.add(preset)
     db.session.commit()
-    
+
     # Create dummy frame
     mock_get_frame.return_value = np.zeros((480, 640, 3), dtype=np.uint8)
-    
+
+    # Use a function side_effect that only raises on the outer 86400s sleep.
+    # A finite list [None, RuntimeError(...)] exhausts and raises StopIteration
+    # when inner detect_plant_stage() calls also hit time.sleep(0.01) under
+    # the same patch — causing intermittent failures in the full test suite.
+    def _stop_on_long_sleep(duration):
+        if duration >= 1.0:
+            raise RuntimeError("Stop thread")
+
+    camera_ml.plant_monitor_running = True
     try:
-        with pytest.raises(RuntimeError, match="Stop thread"):
-            plant_monitor_thread()
+        with patch('camera_ml.time.sleep', side_effect=_stop_on_long_sleep):
+            with pytest.raises(RuntimeError, match="Stop thread"):
+                plant_monitor_thread()
     finally:
         camera_ml.plant_monitor_running = False
-        
+
     status = PlantStageStatus.query.first()
 
     assert status.plant_stage == "Flowering"

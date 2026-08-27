@@ -3,7 +3,7 @@
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
 > **Last Updated:** August 2026  
 > **Repository:** `CyberShadowSensei/hydroagrix-ai-dosing-controller`  
-> **System Status:** Production Ready & Verified (221 Automated Tests Passing: 195 Backend Pytest + 26 Frontend Vitest)
+> **System Status:** Production Ready & Verified (227 Automated Tests Passing: 201 Backend Pytest + 26 Frontend Vitest)
 
 
 ---
@@ -243,6 +243,15 @@ The system includes a target database diagnostic script located at `~/hydro-db-c
 - Every 24 hours, `plant_monitor_thread` captures a frame from the USB camera.
 - Computes the green leaf pixel ratio using the YOLO stage classifier or HSV color space fallback.
 - The detected stage is saved to the database and broadcasted as informational metadata (`ml_info` / `ml_stage`) over Socket.IO, while the scheduled grow cycle timeline retains strict precedence for active dosing limits.
+
+### 6.3 Flood-and-Drain Circulation Plateau Tracking & RO Water Handling (`backend/sensors.py`)
+In circulating / flood-and-drain hydroponic setups, water periodically drops into crop channels (e.g., 20 mins drain, 10 mins return), leaving the reservoir EC probe temporarily exposed to air (reading 0.3–0.5 mS/cm).
+- **Plateau Tracker (`CirculationPlateauTracker`)**: Automatically detects circulation drop events when EC drops by $>0.6\text{ mS/cm}$ from the established submerged baseline. Holds `effective_value = plateau_ec`, sets `is_drain_cycle = True`, and suppresses false low-EC alarms.
+- **Settle Delay**: When water returns to the reservoir, requires 20 consecutive readings (10 seconds) within 0.3 mS/cm of the plateau before marking the reading as stable (`is_stable_plateau = True`).
+- **Dosing Lock & Adaptive Calibration Safety**:
+  - `check_and_adjust_sensors()` locks out dosing during drain cycles (`is_drain_cycle == True`).
+  - `_evaluate_last_dose()` defers self-tuning evaluation until the next stable plateau, preventing corrupted exponential moving average factors from dry probe readings.
+- **Fresh RO Water Adaptation**: If a reservoir is emptied and refilled with pure RO water (~0.0–0.4 mS/cm), the tracker observes steady flat readings ($\Delta < 0.05$) for $\ge 600$ ticks ($>15$ mins), automatically adapting the plateau down to the fresh RO baseline and enabling normal automated nutrient dosing from scratch.
 
 ---
 

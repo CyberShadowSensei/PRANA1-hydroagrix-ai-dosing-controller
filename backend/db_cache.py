@@ -12,38 +12,41 @@ def init_cache(app, db):
     from models import SensorLimits, PlantStageStatus, SolutionTanks
     with app.app_context():
         with _lock:
-            _sensor_limits.clear()
-            for limit in SensorLimits.query.all():
-                _sensor_limits[limit.sensor_type] = {
-                    "min": limit.min_value,
-                    "max": limit.max_value,
-                    "active": limit.is_active
-                }
-            
-            status = PlantStageStatus.query.first()
-            if status:
-                _plant_status["plant_name"] = status.plant_name
-                _plant_status["plant_stage"] = status.plant_stage
-                _plant_status["state"] = status.state
-                _plant_status["cycle_start_date"] = status.cycle_start_date
-            else:
-                _plant_status["plant_name"] = ""
-                _plant_status["plant_stage"] = "Idle"
-                _plant_status["state"] = False
-                _plant_status["cycle_start_date"] = None
+            try:
+                _sensor_limits.clear()
+                for limit in SensorLimits.query.all():
+                    _sensor_limits[limit.sensor_type] = {
+                        "min": limit.min_value,
+                        "max": limit.max_value,
+                        "active": limit.is_active
+                    }
+                
+                status = PlantStageStatus.query.first()
+                if status:
+                    _plant_status["plant_name"] = status.plant_name
+                    _plant_status["plant_stage"] = status.plant_stage
+                    _plant_status["state"] = status.state
+                    _plant_status["cycle_start_date"] = status.cycle_start_date
+                else:
+                    _plant_status["plant_name"] = ""
+                    _plant_status["plant_stage"] = "Idle"
+                    _plant_status["state"] = False
+                    _plant_status["cycle_start_date"] = None
 
-            _solution_tanks.clear()
-            for tank in SolutionTanks.query.all():
-                _solution_tanks[tank.tank_id] = {
-                    "name": tank.name,
-                    "capacity_ml": tank.capacity_ml,
-                    "current_volume_ml": tank.current_volume_ml,
-                    "last_alert_sent": tank.last_alert_sent or 0.0,
-                    "consecutive_blocked_attempts": tank.consecutive_blocked_attempts or 0,
-                    "next_allowed_alert_time": tank.next_allowed_alert_time or 0.0
-                }
-            _initialized = True
-            print("DEBUG: db_cache initialized successfully.")
+                _solution_tanks.clear()
+                for tank in SolutionTanks.query.all():
+                    _solution_tanks[tank.tank_id] = {
+                        "name": tank.name,
+                        "capacity_ml": tank.capacity_ml,
+                        "current_volume_ml": tank.current_volume_ml,
+                        "last_alert_sent": tank.last_alert_sent or 0.0,
+                        "consecutive_blocked_attempts": tank.consecutive_blocked_attempts or 0,
+                        "next_allowed_alert_time": tank.next_allowed_alert_time or 0.0
+                    }
+                _initialized = True
+                print("DEBUG: db_cache initialized successfully.")
+            except Exception as e:
+                print(f"DEBUG: db_cache init skipped or failed: {e}")
 
 def get_sensor_limits():
     if not _initialized:

@@ -24,6 +24,7 @@ backend/mydatabase.db
 mydatabase.db
 *.log
 logs.txt
+email logs.txt
 backend/test_output.txt
 frontend/vitest-results.json
 

@@ -120,6 +120,7 @@ const Dashboard = () => {
   const [currentHumidity, setCurrentHumidity] = useState({ value: 0, time: "N/A" });
   const [currentPH, setCurrentPH] = useState({ value: 0, state: "Neutral", time: "N/A" });
   const [currentTDS, setCurrentTDS] = useState({ value: 0, time: "N/A" });
+  const [isDrainCycle, setIsDrainCycle] = useState(false);
 
   // Historical data for all sensors
   const [sensorData, setSensorData] = useState([]);
@@ -141,6 +142,7 @@ const Dashboard = () => {
       const response = await axios.get('/get_grow_cycle_status', { signal });
       setCycleStatus(response.data);
       setIsAutomatic(response.data.is_automatic === true || response.data.state === true);
+      setIsDrainCycle(response.data.is_drain_cycle === true);
     } catch (error) {
       if (!axios.isCancel(error)) {
         console.error("Error fetching grow cycle status:", error);
@@ -176,6 +178,17 @@ const Dashboard = () => {
     }
   };
 
+  const getEffectiveLimits = (type) => {
+    const limit = sensorLimits[type] || sensorLimits[type.toUpperCase()] || null;
+    if (limit && limit.active === false) return null;
+    if (limit) return limit;
+    if (isAutomatic && cycleStatus?.limits) {
+        const mapping = { ph: 'ph', tds: 'ec', temperature: 'temp' };
+        return cycleStatus.limits[mapping[type]] || null;
+    }
+    return null;
+  };
+
   // Re-computes instantly whenever any sensor value, limits, or mode changes
   const activeWarnings = useMemo(() => {
     const warnings = [];
@@ -186,13 +199,15 @@ const Dashboard = () => {
     const tds = sensorLimits.tds || sensorLimits.TDS || null;
     const tmp = sensorLimits.temperature || null;
 
-    const phLimits   = (ph  && ph.active  !== false)  ? ph
-                     : (isAutomatic && cycleStatus?.limits?.ph)  ? cycleStatus.limits.ph
+    const phLimits   = (ph && ph.active === false) ? null
+                     : ph ? ph
+                     : (isAutomatic && cycleStatus?.limits?.ph) ? cycleStatus.limits.ph
                      : null;
-    const ecLimits   = (tds && tds.active !== false)  ? tds
-                     : (isAutomatic && cycleStatus?.limits?.ec)  ? cycleStatus.limits.ec
+    const ecLimits   = (tds && tds.active === false) ? null
+                     : tds ? tds
+                     : (isAutomatic && cycleStatus?.limits?.ec) ? cycleStatus.limits.ec
                      : null;
-    const tempLimits = (tmp && tmp.active !== false)  ? tmp : null;
+    const tempLimits = (tmp && tmp.active !== false) ? tmp : null;
 
     const phaseName = cycleStatus?.phase || "active";
 
@@ -366,6 +381,10 @@ const Dashboard = () => {
     const handleTelemetry = (data) => {
       const now = new Date().toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
+      if (data.is_drain_cycle !== undefined) {
+        setIsDrainCycle(Boolean(data.is_drain_cycle));
+      }
+
       if (data.ph !== null && data.ph !== undefined) {
         setCurrentPH({ value: data.ph, state: getPHState(data.ph), time: 'Live' });
         throttledSetPHData(prev => {
@@ -375,10 +394,11 @@ const Dashboard = () => {
       }
 
       if (data.ec !== null && data.ec !== undefined) {
-        setCurrentTDS({ value: data.ec, time: 'Live' });
+        const displayVal = data.is_drain_cycle && data.effective_ec ? data.effective_ec : data.ec;
+        setCurrentTDS({ value: displayVal, time: 'Live' });
         throttledSetTdsData(prev => {
           const withoutLive = prev.filter(p => !p.isLive);
-          return [...withoutLive, { time: now, tds_value: data.ec, isLive: true }];
+          return [...withoutLive, { time: now, tds_value: displayVal, isLive: true }];
         });
       }
 

@@ -13,7 +13,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///mydatabase.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "connect_args": {"timeout": 15}
+    "connect_args": {"timeout": 30}
 }
 
 db = SQLAlchemy(app)

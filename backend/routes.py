@@ -520,6 +520,10 @@ def refill_tank():
         tank.consecutive_blocked_attempts = 0
         tank.next_allowed_alert_time = 0.0
         db.session.commit()
+        try:
+            socketio.emit('tank_levels_updated', {'tank_id': tank.tank_id, 'current_volume_ml': tank.current_volume_ml})
+        except Exception:
+            pass
         return jsonify(tank.to_json()), 200
     return jsonify({"error": "tank not found"}), 404
 
@@ -969,6 +973,10 @@ def dosing_config():
                 c_key = fields["capacity"]
                 if v_key in data:
                     tank.current_volume_ml = float(data[v_key])
+                    if tank.current_volume_ml > 0:
+                        tank.last_alert_sent = 0.0
+                        tank.consecutive_blocked_attempts = 0
+                        tank.next_allowed_alert_time = 0.0
                     if c_key not in data:
                         tank.capacity_ml = float(data[v_key])
                 if c_key in data:

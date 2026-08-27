@@ -27,8 +27,10 @@ const QuickPumpWidget = () => {
     };
     
     socket.on('telemetry_update', handleTelemetry);
+    socket.on('pump_status_update', setPumpStatus);
     return () => {
       socket.off('telemetry_update', handleTelemetry);
+      socket.off('pump_status_update', setPumpStatus);
     };
   }, []);
 

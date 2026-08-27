@@ -55,21 +55,24 @@ def log_pump_action(pump_id, duration, trigger_type):
                     tank.next_allowed_alert_time = current_time + 3600
                     
                     if current_time - tank.last_alert_sent > 3600:
-                        sensor_monitor.send_email_alert(
-                            "SYSTEM",
-                            f"Tank '{tank.name}' is EMPTY. Pump {pump_id} will be disabled until the tank is refilled. Please refill immediately.",
-                            "DANGER",
-                            bypass_cooldown=True
-                        )
+                        # Dispatch email on a daemon thread — SMTP must NOT block the DB commit
+                        _msg = f"Tank '{tank.name}' is EMPTY. Pump {pump_id} will be disabled until the tank is refilled. Please refill immediately."
+                        threading.Thread(
+                            target=sensor_monitor.send_email_alert,
+                            args=("SYSTEM", _msg, "DANGER", True),
+                            daemon=True
+                        ).start()
                         tank.last_alert_sent = current_time
                 # Alert: tank critically low (< 10%)
                 elif tank.current_volume_ml < tank.capacity_ml * 0.1:
                     if time.time() - tank.last_alert_sent > 86400:
-                        sensor_monitor.send_email_alert(
-                            "SYSTEM",
-                            f"Tank '{tank.name}' is critically low ({tank.current_volume_ml:.1f} mL / {tank.capacity_ml:.0f} mL remaining). Please refill soon.",
-                            "DANGER"
-                        )
+                        _msg = f"Tank '{tank.name}' is critically low ({tank.current_volume_ml:.1f} mL / {tank.capacity_ml:.0f} mL remaining). Please refill soon."
+                        # Dispatch email on a daemon thread — SMTP must NOT block the DB commit
+                        threading.Thread(
+                            target=sensor_monitor.send_email_alert,
+                            args=("SYSTEM", _msg, "DANGER"),
+                            daemon=True
+                        ).start()
                         tank.last_alert_sent = time.time()
 
             db.session.commit()
@@ -317,6 +320,11 @@ def save_system_config(config, config_path="system_config.json"):
 def _evaluate_last_dose(current_tds, current_ph, config):
     global _last_ec_prediction, _last_ph_up_prediction, _last_ph_down_prediction
 
+    # If the system is currently in a drain cycle (probe dry/unsubmerged),
+    # defer evaluation until water returns to the stable plateau.
+    if live_tds_data and live_tds_data[-1].get("is_drain_cycle"):
+        return
+
     cooldown_s = float(config.get("cooldown_minutes", 15.0)) * 60
 
     if _last_ec_prediction and (time.time() - _last_ec_prediction['time']) >= cooldown_s:
@@ -380,13 +388,11 @@ def check_and_adjust_sensors():
     if time.time() - last_dosing_time < cooldown_s:
         return
         
-    import db_cache
-    status_rec = db_cache.get_plant_status()
-    # Dosing should not start until the user has started a Growth Cycle
-    if not status_rec or not status_rec.get("plant_name"):
-        return
-            
     if not live_ph_data or not live_tds_data:
+        return
+
+    # Gating: if the system is currently in a drain cycle, pause dosing decisions
+    if live_tds_data[-1].get("is_drain_cycle"):
         return
         
     with app.app_context():
@@ -445,6 +451,11 @@ def check_and_adjust_sensors():
             _consecutive_halt_ticks = 0
             last_error_alert_time = 0
 
+        import db_cache
+        status_rec = db_cache.get_plant_status()
+        # Dosing should not start until the user has started a Growth Cycle
+        if not status_rec or not status_rec.get("plant_name"):
+            return
 
         l_ph_db = db_cache.get_sensor_limit("ph")
         l_tds_db = db_cache.get_sensor_limit("tds")
@@ -467,11 +478,15 @@ def check_and_adjust_sensors():
                     if 'ph' in limits and isinstance(limits['ph'], dict):
                         base_min = l_ph_db["min"] if l_ph_db else 0
                         base_max = l_ph_db["max"] if l_ph_db else 14
-                        l_ph = MockLimit(limits['ph'].get('min', base_min), limits['ph'].get('max', base_max), True)
+                        # Preserve user's is_active toggle — grow cycle overrides range only, not monitoring state
+                        ph_is_active = l_ph_db.get("active", True) if l_ph_db else True
+                        l_ph = MockLimit(limits['ph'].get('min', base_min), limits['ph'].get('max', base_max), ph_is_active)
                     if 'ec' in limits and isinstance(limits['ec'], dict):
                         base_min = l_tds_db["min"] if l_tds_db else 0
                         base_max = l_tds_db["max"] if l_tds_db else 5
-                        l_tds = MockLimit(limits['ec'].get('min', base_min), limits['ec'].get('max', base_max), True)
+                        # Preserve user's is_active toggle — grow cycle overrides range only, not monitoring state
+                        tds_is_active = l_tds_db.get("active", True) if l_tds_db else True
+                        l_tds = MockLimit(limits['ec'].get('min', base_min), limits['ec'].get('max', base_max), tds_is_active)
             except Exception as e:
                 log_event("SYSTEM_ERROR", "ERROR", f"Failed to fetch grow cycle limits for dosing. Error: {e}", {"error": str(e)})
                     
@@ -520,4 +535,10 @@ def _reset_dosing_state():
     _ec_intervention_last_sent = None
     _is_system_halt_alert_sent = False
     _consecutive_halt_ticks = 0
+    try:
+        import sensors
+        if hasattr(sensors, 'circulation_tracker'):
+            sensors.circulation_tracker.reset()
+    except Exception:
+        pass
 

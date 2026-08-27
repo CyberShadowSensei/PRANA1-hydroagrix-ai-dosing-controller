@@ -26,7 +26,10 @@ class TestDosing(unittest.TestCase):
     
     def setUp(self):
         import dosing
+        import sensors
         dosing._reset_dosing_state()
+        sensors.live_ph_data.clear()
+        sensors.live_tds_data.clear()
 
 
     @patch('os.path.exists')

@@ -203,8 +203,21 @@ def get_stable_reading(channel):
     return sum(clean) / len(clean)
 
 # --- PUMP ABSTRACTIONS ---
+def get_pump_status():
+    return {f"pump{k}": v for k, v in pump_status.items()}
+
+def _broadcast_pump_status():
+    try:
+        from config import socketio
+        socketio.emit('pump_status_update', get_pump_status())
+    except Exception:
+        pass
+
 def pump_start(pump_id):
-    if not HARDWARE_AVAILABLE: return
+    if not HARDWARE_AVAILABLE:
+        pump_status[pump_id] = "running"
+        _broadcast_pump_status()
+        return
     if pump_permission_check is not None:
         if not pump_permission_check(pump_id):
             print(f"DEBUG HAL: Pump {pump_id} start blocked by safety check.")
@@ -221,9 +234,14 @@ def pump_start(pump_id):
             print(f"DEBUG HAL: Pump {pump_id} started on BCM pins {pins['in1']}(HIGH) and {pins['in2']}(LOW). EN={pins.get('en')}")
         except Exception as e:
             print(f"CRITICAL HAL ERROR: Failed to drive GPIO pins for Pump {pump_id}: {e}")
+        finally:
+            _broadcast_pump_status()
 
 def pump_stop(pump_id):
-    if not HARDWARE_AVAILABLE: return
+    if not HARDWARE_AVAILABLE:
+        pump_status[pump_id] = "stopped"
+        _broadcast_pump_status()
+        return
     pins = PUMP_PINS.get(pump_id)
     if not pins: return
     with pump_lock:
@@ -236,10 +254,16 @@ def pump_stop(pump_id):
             print(f"DEBUG HAL: Pump {pump_id} stopped. Pins {pins['in1']}/{pins['in2']} set to LOW. EN={pins.get('en')}")
         except Exception as e:
             print(f"CRITICAL HAL ERROR: Failed to stop Pump {pump_id}: {e}")
+        finally:
+            _broadcast_pump_status()
 
 def emergency_stop_all():
     """Forces all pumps to halt instantly."""
-    if not HARDWARE_AVAILABLE: return
+    if not HARDWARE_AVAILABLE:
+        for pump_id in PUMP_PINS.keys():
+            pump_status[pump_id] = "stopped"
+        _broadcast_pump_status()
+        return
     with pump_lock:
         for pump_id in PUMP_PINS.keys():
             pins = PUMP_PINS[pump_id]
@@ -251,6 +275,7 @@ def emergency_stop_all():
                 pump_status[pump_id] = "stopped"
             except Exception as e:
                 print(f"CRITICAL HAL ERROR: Emergency Stop Failed for Pump {pump_id}: {e}")
+        _broadcast_pump_status()
 
 def cleanup():
     """Forces all pumps to halt instantly and cleans up GPIO and I2C connections."""

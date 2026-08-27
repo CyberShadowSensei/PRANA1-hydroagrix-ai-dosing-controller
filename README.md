@@ -24,18 +24,51 @@ This is a highly fault-tolerant, self-healing control system built for the harsh
 
 ```mermaid
 graph TD
-    A[EC & pH Sensors] --> B[ManualADC SMBus 0x04 via I2C]
-    B --> C[sensors.py Telemetry Engine]
-    C --> D[routes.py Flask API & Socket.IO]
-    D --> E[SQLite EventLog & PumpLog]
-    D --> F[system_config.json Stage Limits]
-    G[USB Camera V4L2] --> H[camera_ml.py Growth Classifier]
-    H --> I[Update PlantStageStatus DB]
-    I --> F
-    D --> J[React Frontend Dashboard UI]
-    J --> D
-    D --> K[hal.py Hardware Abstraction Layer]
-    K --> L[4x Peristaltic Pumps Nutrients A/B, pH UP/DOWN]
+    subgraph Hardware Layer
+        ADC["ManualADC (I2C 0x04)"] -->|Ch 0| EC["EC / TDS Sensor"]
+        ADC -->|Ch 2| PH["pH Sensor"]
+        DS18B20["DS18B20 (1-Wire /sys/bus/w1)"] --> Temp["Water Temp Probe"]
+        DHT22["DHT22 (GPIO BCM 5)"] --> Climate["Air Temp & Humidity"]
+        CAM["USB Camera (/dev/video0)"] --> Vision["V4L2 OpenCV Capture"]
+        Pumps["4x Peristaltic Pumps"] <--|GPIO 18-27 BCM| L298N["L298N H-Bridge Drivers"]
+    end
+
+    subgraph Backend Subsystem (Python 3.10 / Flask / Socket.IO)
+        HAL["hal.py (Hardware Abstraction Layer)"] <--> ADC
+        HAL <--> DS18B20
+        HAL <--> DHT22
+        HAL <--> Pumps
+
+        SensorsEngine["sensors.py (Piecewise Calibration & CirculationPlateauTracker)"] <--> HAL
+        
+        FetchLoop["main.py (500ms Daemon Fetch Loop)"] --> SensorsEngine
+        FetchLoop --> DosingEngine["dosing.py (Adaptive Control & Cooldown)"]
+        
+        DosingEngine -->|Pump Trigger / Emergency Halt| HAL
+        DosingEngine <--> DB[("SQLite DB (mydatabase.db)")]
+
+        CameraML["camera_ml.py (HSV / YOLO Crop Growth Classifier)"] <--> CAM
+        GrowHelper["grow_cycle_helper.py (Cycle Day & Phase Progression)"] <--> DosingEngine
+
+        RestAPI["routes.py (Flask REST API Endpoints)"] <--> DB
+        RestAPI <--> HAL
+        RestAPI <--> GrowHelper
+
+        SocketIO["Flask-SocketIO Server"] <--|Live Telemetry / Video Frames| FetchLoop
+        SocketIO <--|Frame Streaming| CameraML
+    end
+
+    subgraph Frontend Subsystem (React / Vite / Tailwind)
+        SocketClient["socket.js Singleton (Socket.IO-Client)"] <--> SocketIO
+        
+        Dashboard["Dashboard UI (Live Gauges & HUD)"] <--> SocketClient
+        Dashboard <--> RestAPI
+
+        PresetsManager["Plant Presets Manager"] <--> RestAPI
+        PumpControls["Manual Pump Controls & Priming"] <--> RestAPI
+        SettingsUI["System Config & Calibrations"] <--> RestAPI
+        HistoryUI["Historical Analytics & Charts"] <--> RestAPI
+    end
 ```
 
 ---
@@ -46,6 +79,11 @@ graph TD
 - **Dynamic Delta Dosing Algorithm**: The core engine calculates target chemical deltas, reservoir volumes in liters, and calibrated pump flow rates in mL/s to dispense micro-precise nutrient and pH adjustments.
 - **Self-Learning Calibration (Auto-Tuning)**: Evaluates actual vs. predicted sensor deltas after a strict mixing cooldown period. If a pump under-delivers due to tube wear, the system recalculates and updates the efficacy multiplier for the next run.
 - **Intelligent Crop Cycle Management**: Automatically tracks crop growth timelines (Tomatoes, Lettuce, Basil, or Custom presets), managing phase transitions and shifting target chemical boundaries without human intervention.
+
+### Circulation Plateau Tracking & RO Water Auto-Detection
+- **Flood-and-Drain Resilient Tracking**: In circulating hydroponic systems where water rotates between the tank and channels, probe dry exposure causes temporary EC drops (0.3–0.5 mS/cm). The `CirculationPlateauTracker` holds the true solution plateau EC, flags drain cycles, and pauses dosing until water returns and stabilizes.
+- **Fresh RO Water Fill Detection**: Seamlessly distinguishes temporary drain drops from fresh pure water refills. If a reservoir is refilled with pure RO water, the tracker identifies the flat low baseline ($\Delta < 0.05$ over 15 mins) and adapts the plateau down, allowing automated dosing from scratch.
+- **Deferred Adaptive Calibration**: Automatically defers self-tuning feedback evaluation during drain dips, preventing corrupted exponential moving average factors.
 
 ### High-Precision Sensing & Edge Vision
 - **Nernst Temperature Compensation**: Analog probes are notoriously sensitive to water temperature. Prana 1 applies multi-point piecewise linear interpolation and active Nernst equation compensation using DS18B20 thermal readings to guarantee laboratory-grade accuracy.
@@ -74,9 +112,10 @@ Deploying complex hardware-software stacks to edge devices requires precision. P
 
 ## Automated Test Suites
 
-Reliability is non-negotiable. Prana 1 is heavily verified by 221 total passing automated tests across the entire stack:
+Reliability is non-negotiable. Prana 1 is heavily verified by **227 total passing automated tests** across the entire stack:
 
-### Backend Pytest Suite (195 Tests)
+### Backend Pytest Suite (201 Tests)
+- **Circulation & Flood-Drain Tracking (`test_circulation_plateau.py`)**: Tests submerged plateau hold, settle ticks on water return, fresh RO water baseline adaptation, and drain-cycle dosing lockouts.
 - **HAL Hardware Layer (`test_hal.py`)**: Extensively tests hardware fallback mocks, ADC channel validation bounds, strict L298N pump lock reentrancy, and DS18B20 1-Wire parsing.
 - **Dosing & Safety Control (`test_dosing.py`, `test_new_dosing.py`, `test_mid_dose_cutoff.py`)**: Validates the complex volume mathematics, strict runtime clamping (2s minimum to 300s maximum), cooldown timer logic, mid-dose emergency cutoffs, and the self-learning calibration math.
 - **REST APIs & Routes (`test_api.py`, `test_api_dosing.py`, `test_api_plants.py`)**: Tests endpoint payload validation, asynchronous pump priming, crop preset selection, and cycle completion state machines.

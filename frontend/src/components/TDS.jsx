@@ -16,29 +16,32 @@ import { RefreshCw } from "lucide-react";
 const TDS = () => {
   const [tdsData, setTdsData] = useState([]);
   const [currentTDS, setCurrentTDS] = useState(0);
+  const [isDrainCycle, setIsDrainCycle] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const maxDataPoints = 20; // Limit the number of points shown on graph
 
-  useEffect(() => {
-    const fetchTDSHistoryData = async () => {
-      setIsLoading(true);
-      try {
-        const response = await axios.get('/get_tds_history');
-        const historyData = response.data;
-        const formattedData = historyData.tds_data.map(item => ({
-          time: item.date,
-          value: parseFloat(item.tds_value)
-        }));
-        
-        const recentData = formattedData.slice(-maxDataPoints);
-        setTdsData(recentData);
-      } catch (error) {
-        console.error("Error fetching historical TDS data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  // Lifted outside useEffect so the refresh button can call it too
+  const fetchTDSHistoryData = async () => {
+    setIsLoading(true);
+    try {
+      const response = await axios.get('/get_tds_history');
+      const historyData = response.data;
+      // Map to tds_value key to match the chart's dataKey and live socket injections
+      const formattedData = historyData.tds_data.map(item => ({
+        time: item.date,
+        tds_value: parseFloat(item.tds_value)
+      }));
+      
+      const recentData = formattedData.slice(-maxDataPoints);
+      setTdsData(recentData);
+    } catch (error) {
+      console.error("Error fetching historical TDS data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchTDSHistoryData();
     const historyInterval = setInterval(fetchTDSHistoryData, 300000); // Chart updates every 5 mins
 
@@ -46,12 +49,16 @@ const TDS = () => {
     // listener, not all telemetry_update listeners on the singleton socket.
     const handleTelemetry = (data) => {
       const now = new Date().toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      if (data.is_drain_cycle !== undefined) {
+        setIsDrainCycle(Boolean(data.is_drain_cycle));
+      }
       if (data.ec !== null && data.ec !== undefined) {
-        setCurrentTDS(parseFloat(data.ec).toFixed(1));
+        const displayVal = data.is_drain_cycle && data.effective_ec ? data.effective_ec : data.ec;
+        setCurrentTDS(parseFloat(displayVal).toFixed(1));
         setTdsData(prev => {
           if (prev.length === 0) return prev;
           const withoutLive = prev.filter(p => !p.isLive);
-          return [...withoutLive, { time: now, tds_value: data.ec, isLive: true }];
+          return [...withoutLive, { time: now, tds_value: displayVal, isLive: true }];
         });
       }
     };
@@ -89,7 +96,7 @@ const TDS = () => {
           </div>
           
           <button 
-            onClick={fetchSingleTDSData}
+            onClick={fetchTDSHistoryData}
             disabled={isLoading}
             className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 border border-emerald-500/30 hover:border-emerald-500 text-emerald-400 font-bold transition-all active:scale-95 disabled:opacity-50 group shadow-lg shadow-emerald-900/10"
           >
@@ -114,6 +121,15 @@ const TDS = () => {
                 </span>
                 <span className="text-2xl font-medium text-slate-500 uppercase tracking-widest">mS/cm</span>
               </div>
+              {isDrainCycle && (
+                <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-xs font-semibold shadow-sm">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                  </span>
+                  Channel Circulation Active (Holding Plateau &amp; Dosing Paused)
+                </div>
+              )}
               <p className="text-slate-500 mt-6 text-sm max-w-md">
                 Electrical Conductivity (EC) measures the amount of dissolved salts (nutrients) in the water. Keep this within the plant's optimal range for maximum growth.
               </p>
