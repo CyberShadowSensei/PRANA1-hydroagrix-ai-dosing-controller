@@ -298,9 +298,15 @@ def daily_digest_loop():
                         PumpLog.query.filter(PumpLog.timestamp < threshold_date).delete(synchronize_session=False)
                         db.session.commit()
                         print("DEBUG: Pruned telemetry and logs older than 30 days.")
+                        
+                        from sqlalchemy import text
+                        db.session.execute(text("PRAGMA optimize;"))
+                        db.session.execute(text("PRAGMA wal_checkpoint(PASSIVE);"))
+                        db.session.commit()
+                        print("DEBUG: SQLite PRAGMA optimize & WAL checkpoint completed.")
                     except Exception as e:
                         db.session.rollback()
-                        print(f"DEBUG: Pruning failed: {e}")
+                        print(f"DEBUG: Pruning and optimization failed: {e}")
                 
                 prune_old_photos(photo_dir="captured_photos", max_days=30)
                 # Sleep 65s so we don't re-trigger within the same minute
