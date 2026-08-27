@@ -133,6 +133,20 @@ class CirculationPlateauTracker:
                 "status": "DRAIN_CYCLE" if self.is_drain_cycle else "OK"
             }
 
+    def get_metrics(self):
+        with self._lock:
+            return {
+                "plateau_ec": self.plateau_ec,
+                "is_drain_cycle": self.is_drain_cycle,
+                "is_stable_plateau": self.is_stable_plateau,
+                "settle_counter": self.settle_counter,
+                "settle_ticks_required": self.settle_ticks,
+                "low_steady_counter": self.low_steady_counter,
+                "ro_steady_ticks_required": self.ro_steady_ticks,
+                "last_raw_ec": self.last_raw_ec,
+                "drain_start_time": self.drain_start_time
+            }
+
     def reset(self):
         with self._lock:
             self.plateau_ec = None

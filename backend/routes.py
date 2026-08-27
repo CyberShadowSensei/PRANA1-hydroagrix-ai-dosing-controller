@@ -1359,3 +1359,79 @@ def change_grow_cycle_phase():
         "message": f"Phase successfully updated to '{new_stage}'",
         "details": details
     }), 200
+
+
+# --- SYSTEM HEALTH & CIRCULATION TELEMETRY ENDPOINTS ---
+
+@app.route("/api/system_health", methods=["GET"])
+def get_system_health():
+    """
+    Comprehensive health-check endpoint for system status, database WAL state,
+    hardware abstraction layer status, and live telemetry metrics.
+    """
+    try:
+        db_healthy = True
+        db_journal_mode = "unknown"
+        try:
+            from sqlalchemy import text
+            res = db.session.execute(text("PRAGMA journal_mode;")).fetchone()
+            if res:
+                db_journal_mode = res[0]
+        except Exception as e:
+            db_healthy = False
+            db_journal_mode = f"error: {e}"
+
+        hal_status = {
+            "is_hardware_available": getattr(hal, "is_hardware_available", False),
+            "pump_status": getattr(hal, "pump_status", {}),
+        }
+
+        circulation_status = circulation_tracker.get_metrics()
+
+        latest_ph = live_ph_data[-1] if live_ph_data else None
+        latest_tds = live_tds_data[-1] if live_tds_data else None
+        latest_th = live_th_data[-1] if live_th_data else None
+
+        overall_status = "OK" if db_healthy else "DEGRADED"
+
+        return jsonify({
+            "status": overall_status,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "database": {
+                "healthy": db_healthy,
+                "journal_mode": db_journal_mode
+            },
+            "hardware": hal_status,
+            "circulation_tracker": circulation_status,
+            "telemetry": {
+                "has_ph_data": latest_ph is not None,
+                "has_tds_data": latest_tds is not None,
+                "has_th_data": latest_th is not None,
+                "last_ph_reading": latest_ph.get("value") if latest_ph else None,
+                "last_ec_reading": latest_tds.get("effective_value", latest_tds.get("value")) if latest_tds else None,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "ERROR",
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/circulation_status", methods=["GET"])
+def get_circulation_status():
+    """
+    Returns detailed metrics regarding flood-and-drain circulation, plateau EC,
+    settle delay counter, and fresh RO water auto-detection.
+    """
+    try:
+        metrics = circulation_tracker.get_metrics()
+        return jsonify({
+            "success": True,
+            "metrics": metrics
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
