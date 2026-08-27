@@ -24,50 +24,50 @@ This is a highly fault-tolerant, self-healing control system built for the harsh
 
 ```mermaid
 graph TD
-    subgraph Hardware Layer
+    subgraph Hardware_Layer ["Hardware Layer"]
         ADC["ManualADC (I2C 0x04)"] -->|Ch 0| EC["EC / TDS Sensor"]
         ADC -->|Ch 2| PH["pH Sensor"]
         DS18B20["DS18B20 (1-Wire /sys/bus/w1)"] --> Temp["Water Temp Probe"]
         DHT22["DHT22 (GPIO BCM 5)"] --> Climate["Air Temp & Humidity"]
         CAM["USB Camera (/dev/video0)"] --> Vision["V4L2 OpenCV Capture"]
-        Pumps["4x Peristaltic Pumps"] <--|GPIO 18-27 BCM| L298N["L298N H-Bridge Drivers"]
+        L298N["L298N H-Bridge Drivers"] -->|GPIO 18-27 BCM| Pumps["4x Peristaltic Pumps"]
     end
 
-    subgraph Backend Subsystem (Python 3.10 / Flask / Socket.IO)
-        HAL["hal.py (Hardware Abstraction Layer)"] <--> ADC
-        HAL <--> DS18B20
-        HAL <--> DHT22
-        HAL <--> Pumps
+    subgraph Backend_Subsystem ["Backend Subsystem (Python 3.10 / Flask / Socket.IO)"]
+        HAL["hal.py (Hardware Abstraction Layer)"] --> ADC
+        HAL --> DS18B20
+        HAL --> DHT22
+        HAL --> Pumps
 
-        SensorsEngine["sensors.py (Piecewise Calibration & CirculationPlateauTracker)"] <--> HAL
+        SensorsEngine["sensors.py (Piecewise Calibration & CirculationPlateauTracker)"] --> HAL
         
         FetchLoop["main.py (500ms Daemon Fetch Loop)"] --> SensorsEngine
         FetchLoop --> DosingEngine["dosing.py (Adaptive Control & Cooldown)"]
         
         DosingEngine -->|Pump Trigger / Emergency Halt| HAL
-        DosingEngine <--> DB[("SQLite DB (mydatabase.db)")]
+        DosingEngine --> DB[("SQLite DB (mydatabase.db)")]
 
-        CameraML["camera_ml.py (HSV / YOLO Crop Growth Classifier)"] <--> CAM
-        GrowHelper["grow_cycle_helper.py (Cycle Day & Phase Progression)"] <--> DosingEngine
+        CameraML["camera_ml.py (HSV / YOLO Crop Growth Classifier)"] --> CAM
+        GrowHelper["grow_cycle_helper.py (Cycle Day & Phase Progression)"] --> DosingEngine
 
-        RestAPI["routes.py (Flask REST API Endpoints)"] <--> DB
-        RestAPI <--> HAL
-        RestAPI <--> GrowHelper
+        RestAPI["routes.py (Flask REST API Endpoints)"] --> DB
+        RestAPI --> HAL
+        RestAPI --> GrowHelper
 
-        SocketIO["Flask-SocketIO Server"] <--|Live Telemetry / Video Frames| FetchLoop
-        SocketIO <--|Frame Streaming| CameraML
+        FetchLoop -->|Live Telemetry / Video Frames| SocketIO["Flask-SocketIO Server"]
+        CameraML -->|Frame Streaming| SocketIO
     end
 
-    subgraph Frontend Subsystem (React / Vite / Tailwind)
-        SocketClient["socket.js Singleton (Socket.IO-Client)"] <--> SocketIO
+    subgraph Frontend_Subsystem ["Frontend Subsystem (React / Vite / Tailwind)"]
+        SocketClient["socket.js Singleton (Socket.IO-Client)"] --> SocketIO
         
-        Dashboard["Dashboard UI (Live Gauges & HUD)"] <--> SocketClient
-        Dashboard <--> RestAPI
+        Dashboard["Dashboard UI (Live Gauges & HUD)"] --> SocketClient
+        Dashboard --> RestAPI
 
-        PresetsManager["Plant Presets Manager"] <--> RestAPI
-        PumpControls["Manual Pump Controls & Priming"] <--> RestAPI
-        SettingsUI["System Config & Calibrations"] <--> RestAPI
-        HistoryUI["Historical Analytics & Charts"] <--> RestAPI
+        PresetsManager["Plant Presets Manager"] --> RestAPI
+        PumpControls["Manual Pump Controls & Priming"] --> RestAPI
+        SettingsUI["System Config & Calibrations"] --> RestAPI
+        HistoryUI["Historical Analytics & Charts"] --> RestAPI
     end
 ```
 
