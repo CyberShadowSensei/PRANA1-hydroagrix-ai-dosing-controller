@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union
 from models import PlantStageStatus, PlantPreset
 
-def normalize_stages(stages):
+def normalize_stages(stages: Union[str, Dict[str, Any], None]) -> List[Tuple[str, Dict[str, Any]]]:
     """
     Normalizes stages JSON or dictionary into an ordered list of tuples:
     [(phase_name, phase_data), ...] where each phase_data is guaranteed
