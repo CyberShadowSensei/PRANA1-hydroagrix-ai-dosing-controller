@@ -179,9 +179,10 @@ Deploying complex hardware-software stacks to edge devices requires precision. P
 
 ## Automated Test Suites
 
-Reliability is non-negotiable. Prana 1 is heavily verified by **227 total passing automated tests** across the entire stack:
+Reliability is non-negotiable. Prana 1 is heavily verified by **233 total passing automated tests** across the entire stack:
 
-### Backend Pytest Suite (201 Tests)
+### Backend Pytest Suite (204 Tests)
+- **System Health & Circulation Telemetry (`test_system_health_and_circulation_api.py`)**: Validates health check responses, SQLite WAL status, and circulation metrics endpoints.
 - **Circulation & Flood-Drain Tracking (`test_circulation_plateau.py`)**: Tests submerged plateau hold, settle ticks on water return, fresh RO water baseline adaptation, and drain-cycle dosing lockouts.
 - **HAL Hardware Layer (`test_hal.py`)**: Extensively tests hardware fallback mocks, ADC channel validation bounds, strict L298N pump lock reentrancy, and DS18B20 1-Wire parsing.
 - **Dosing & Safety Control (`test_dosing.py`, `test_new_dosing.py`, `test_mid_dose_cutoff.py`)**: Validates the complex volume mathematics, strict runtime clamping (2s minimum to 300s maximum), cooldown timer logic, mid-dose emergency cutoffs, and the self-learning calibration math.
@@ -189,8 +190,8 @@ Reliability is non-negotiable. Prana 1 is heavily verified by **227 total passin
 - **Grow Cycles & Persistence (`test_grow_cycle.py`, `test_models.py`, `test_new_features.py`)**: Ensures accurate phase duration resolution, cumulative start day inference, and database model integrity.
 - **Alerts & System Stress (`test_alerts.py`, `test_performance_stress.py`)**: Benchmarks high-EC alert debouncing, asynchronous email queue resilience, and concurrent database locking under heavy load.
 
-### Frontend Vitest Suite (26 Tests)
-- **UI Components (`Dashboard.test.jsx`, `GlobalHUD.test.jsx`, `QuickCameraWidget.test.jsx`)**: Verifies accurate gauge rendering, critical state badges, and camera stream fallbacks.
+### Frontend Vitest Suite (29 Tests)
+- **UI Components (`Dashboard.test.jsx`, `GlobalHUD.test.jsx`, `CirculationBadge.test.jsx`, `QuickCameraWidget.test.jsx`)**: Verifies accurate gauge rendering, real-time circulation alerts, critical state badges, and camera stream fallbacks.
 - **Preset Management (`PlantPresets.test.jsx`, `PresetManagerModal.test.jsx`, `GrowCycleBanner.test.jsx`)**: Tests timeline visualization logic, complex form submissions, and manual pump override controls.
 
 ### Test Execution Commands

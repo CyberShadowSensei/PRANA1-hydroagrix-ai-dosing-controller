@@ -3,7 +3,7 @@
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
 > **Last Updated:** August 2026  
 > **Repository:** `CyberShadowSensei/hydroagrix-ai-dosing-controller`  
-> **System Status:** Production Ready & Verified (227 Automated Tests Passing: 201 Backend Pytest + 26 Frontend Vitest)
+> **System Status:** Production Ready & Verified (233 Automated Tests Passing: 204 Backend Pytest + 29 Frontend Vitest)
 
 
 ---
@@ -274,6 +274,8 @@ In circulating / flood-and-drain hydroponic setups, water periodically drops int
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/live_gauges` | `GET` | Returns latest pH, EC, temperature, and humidity gauge readings. |
+| `/api/system_health` | `GET` | Returns full system health, database WAL mode, hardware state, and telemetry status. |
+| `/api/circulation_status` | `GET` | Returns flood-and-drain circulation metrics, plateau EC, and RO baseline status. |
 | `/sensor/limits` | `GET` | Returns static sensor limits merged with active autonomous crop stage limits. |
 | `/pump/<id>/start` | `POST` | Starts specified pump (`1`-`4`) for duration. Payload: `{"duration": 5}`. |
 | `/pump/<id>/stop` | `POST` | Halts specified pump instantly and cancels active auto-dosing loops. |
@@ -287,7 +289,7 @@ In circulating / flood-and-drain hydroponic setups, water periodically drops int
 
 | Event Name | Direction | Payload Description |
 | :--- | :--- | :--- |
-| `telemetry_update` | Server $\rightarrow$ Client | Live sensor readings (`ph`, `ec`, `temperature`, `humidity`). |
+| `telemetry_update` | Server $\rightarrow$ Client | Live sensor readings (`ph`, `ec`, `temperature`, `humidity`, `is_drain_cycle`, `effective_ec`). |
 | `camera_frame` | Server $\rightarrow$ Client | Base64-encoded JPEG image string from USB camera feed. |
 | `grow_cycle_update` | Server $\rightarrow$ Client | Full growth cycle progression details, day count, phase, and target limits. |
 
@@ -314,11 +316,11 @@ npm install
 
 ### 8.2 Running the Full Automated Test Suite
 ```bash
-# Run backend pytest suite (195 unit, edge-case, integration & stress tests)
+# Run backend pytest suite (204 unit, edge-case, integration & stress tests)
 cd backend
 python -m pytest -v --tb=short -p no:cacheprovider
 
-# Run frontend Vitest suite (26 React component & HUD tests)
+# Run frontend vitest suite (29 component, store, & UI tests)
 cd ../frontend
 npm test
 ```
