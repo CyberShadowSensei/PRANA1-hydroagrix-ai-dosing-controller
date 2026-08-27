@@ -22,53 +22,120 @@ This is a highly fault-tolerant, self-healing control system built for the harsh
 
 ## System Architecture & Data Flow
 
+Prana 1's architecture is organized into distinct, decoupled subsystems for telemetry, closed-loop actuation, edge intelligence, and operator interaction.
+
+### 1. High-Level System & Edge Hardware Topology
+
 ```mermaid
-graph TD
-    subgraph Hardware_Layer ["Hardware Layer"]
-        ADC["ManualADC (I2C 0x04)"] -->|Ch 0| EC["EC / TDS Sensor"]
-        ADC -->|Ch 2| PH["pH Sensor"]
-        DS18B20["DS18B20 (1-Wire /sys/bus/w1)"] --> Temp["Water Temp Probe"]
-        DHT22["DHT22 (GPIO BCM 5)"] --> Climate["Air Temp & Humidity"]
-        CAM["USB Camera (/dev/video0)"] --> Vision["V4L2 OpenCV Capture"]
-        L298N["L298N H-Bridge Drivers"] -->|GPIO 18-27 BCM| Pumps["4x Peristaltic Pumps"]
+flowchart TB
+    subgraph SENSORS ["Analog & Digital Sensing"]
+        direction TB
+        EC_PROBE["EC / TDS Analog Probe"] -->|Analog 0-3.3V| ADC["ManualADC (I2C 0x04)"]
+        PH_PROBE["pH Analog Probe"] -->|Analog 0-3.3V| ADC
+        TEMP_PROBE["DS18B20 Temp Probe"] -->|1-Wire /sys/bus/w1| HAL_DRV["HAL Driver Module"]
+        DHT_PROBE["DHT22 Climate Sensor"] -->|GPIO BCM 5| HAL_DRV
+        ADC -->|I2C SMBus 1| HAL_DRV
     end
 
-    subgraph Backend_Subsystem ["Backend Subsystem (Python 3.10 / Flask / Socket.IO)"]
-        HAL["hal.py (Hardware Abstraction Layer)"] --> ADC
-        HAL --> DS18B20
-        HAL --> DHT22
-        HAL --> Pumps
-
-        SensorsEngine["sensors.py (Piecewise Calibration & CirculationPlateauTracker)"] --> HAL
-        
-        FetchLoop["main.py (500ms Daemon Fetch Loop)"] --> SensorsEngine
-        FetchLoop --> DosingEngine["dosing.py (Adaptive Control & Cooldown)"]
-        
-        DosingEngine -->|Pump Trigger / Emergency Halt| HAL
-        DosingEngine --> DB[("SQLite DB (mydatabase.db)")]
-
-        CameraML["camera_ml.py (HSV / YOLO Crop Growth Classifier)"] --> CAM
-        GrowHelper["grow_cycle_helper.py (Cycle Day & Phase Progression)"] --> DosingEngine
-
-        RestAPI["routes.py (Flask REST API Endpoints)"] --> DB
-        RestAPI --> HAL
-        RestAPI --> GrowHelper
-
-        FetchLoop -->|Live Telemetry / Video Frames| SocketIO["Flask-SocketIO Server"]
-        CameraML -->|Frame Streaming| SocketIO
+    subgraph ACTUATORS ["Dosing Actuation"]
+        direction TB
+        L298N["L298N Dual H-Bridge Drivers"] -->|Channel 1-4| PUMPS["4x 12V Peristaltic Pumps\n(Nutrient A, B, pH UP, pH DOWN)"]
+        HAL_DRV -->|GPIO BCM 18-27| L298N
     end
 
-    subgraph Frontend_Subsystem ["Frontend Subsystem (React / Vite / Tailwind)"]
-        SocketClient["socket.js Singleton (Socket.IO-Client)"] --> SocketIO
-        
-        Dashboard["Dashboard UI (Live Gauges & HUD)"] --> SocketClient
-        Dashboard --> RestAPI
-
-        PresetsManager["Plant Presets Manager"] --> RestAPI
-        PumpControls["Manual Pump Controls & Priming"] --> RestAPI
-        SettingsUI["System Config & Calibrations"] --> RestAPI
-        HistoryUI["Historical Analytics & Charts"] --> RestAPI
+    subgraph VISION ["Computer Vision Pipeline"]
+        CAM["USB Camera (/dev/video0)"] -->|V4L2 Capture| CV_ENGINE["OpenCV Frame Worker"]
+        CV_ENGINE -->|Leaf Coverage Analysis| STAGE_DET["Growth Stage Classifier"]
     end
+
+    subgraph CORE_BACKEND ["Embedded Controller (Python 3.10 / Flask / Socket.IO)"]
+        direction TB
+        HAL_DRV --> SENSORS_ENGINE["Telemetry & Calibration Engine\n(sensors.py)"]
+        SENSORS_ENGINE -->|Piecewise Linear & Temp Comp| TRACKER["CirculationPlateauTracker\n(Drain Detection & RO Settle)"]
+        TRACKER --> FETCH_DAEMON["500ms Realtime Fetch Loop\n(main.py)"]
+        FETCH_DAEMON --> DOSING_ENGINE["Adaptive Dosing Controller\n(dosing.py)"]
+        DOSING_ENGINE -->|Safe Pulse Execution| HAL_DRV
+        
+        STAGE_DET -->|Advisory Stage Telemetry| REST_API["Flask REST API Layer\n(routes.py)"]
+        GROW_MGR["Grow Cycle Progression Helper\n(grow_cycle_helper.py)"] -->|Target Chemistry Bounds| DOSING_ENGINE
+        
+        FETCH_DAEMON -->|500ms Telemetry Stream| WS_SERVER["Flask-SocketIO Server"]
+        CV_ENGINE -->|Live Camera Frames| WS_SERVER
+        
+        DOSING_ENGINE --> DB[("SQLite DB (WAL Mode)\n(mydatabase.db)")]
+        REST_API --> DB
+    end
+
+    subgraph FRONTEND ["Operator Interface (React 18 / Vite / Tailwind)"]
+        direction TB
+        WS_SERVER <-->|WebSocket Stream| WS_CLIENT["Socket.IO Client Singleton\n(socket.js)"]
+        WS_CLIENT --> DASHBOARD["Live HUD & Gauges\n(Dashboard.jsx)"]
+        WS_CLIENT --> CAMERA_VIEW["Live Stream Widget\n(QuickCameraWidget.jsx)"]
+        
+        REST_API <-->|HTTP REST Requests| DASHBOARD
+        REST_API <-->|HTTP REST Requests| PRESETS_MGR["Plant Presets Manager\n(PlantPresets.jsx)"]
+        REST_API <-->|HTTP REST Requests| PUMP_CTRL["Manual Controls & Priming\n(Pump.jsx)"]
+        REST_API <-->|HTTP REST Requests| SETTINGS["Configuration & Calibration\n(Settings.jsx)"]
+    end
+```
+
+### 2. Closed-Loop Adaptive Dosing State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> IdleMonitoring: 500ms Telemetry Fetch
+
+    state IdleMonitoring {
+        [*] --> CheckDrainCycle
+        CheckDrainCycle --> DosingPaused: is_drain_cycle == True
+        CheckDrainCycle --> CheckBounds: is_drain_cycle == False
+        CheckBounds --> EmergencyHalt: pH < 3.0 or > 10.0 OR EC >= 8.0 mS/cm
+        CheckBounds --> CheckCooldown: Within Safe Limits
+    }
+
+    CheckCooldown --> InCooldown: Time < 15 Minutes
+    CheckCooldown --> ReadyToDose: Cooldown Elapsed & Delta > Tolerance
+
+    state DosingExecution {
+        ReadyToDose --> CalcDose: Target Delta * Reservoir Vol * Nutrient Factor
+        CalcDose --> ClampRuntime: Clamp to [2.0s min, 300.0s max]
+        ClampRuntime --> RunPump: Pulse Selected Peristaltic Pump
+        RunPump --> RecordPrediction: Store Expected Delta & Timestamp
+    }
+
+    DosingExecution --> MixingCooldown: Pump Pulse Complete
+
+    state MixingCooldown {
+        [*] --> AwaitCirculation: Wait 15-Minute Mixing Period
+        AwaitCirculation --> DeferredCheck: Drain Cycle Active (Defer Eval)
+        AwaitCirculation --> SelfTuningEval: Reservoir Stable Submerged
+        SelfTuningEval --> UpdateFactor: Exponential Moving Average Recalibration
+    }
+
+    MixingCooldown --> IdleMonitoring: Recalibration Complete
+    EmergencyHalt --> [*]: Locked Out (Requires Operator Intervention)
+```
+
+### 3. Flood-and-Drain Circulation Plateau Tracker Flow
+
+```mermaid
+flowchart TD
+    RAW_IN["Raw EC Sensor Reading (500ms)"] --> SUB_CHECK{"Is Raw EC < Plateau - 0.6 mS/cm?"}
+
+    SUB_CHECK -->|Yes: Probe Exposed to Air| DRAIN_DETECTED["Flag Drain Cycle Active\n(is_drain_cycle = True)"]
+    DRAIN_DETECTED --> HOLD_PLATEAU["Hold Effective EC = Plateau Value"]
+    HOLD_PLATEAU --> PAUSE_DOSING["Pause Dosing & Defer Calibration\n(Suppresses False Alarms)"]
+
+    SUB_CHECK -->|No: Probe Submerged| LEVEL_CHECK{"Was System in Drain Cycle?"}
+    
+    LEVEL_CHECK -->|Yes: Water Returning| SETTLE_DELAY["Settle Counter Check\n(Require 20 ticks / 10s within 0.3 mS/cm)"]
+    SETTLE_DELAY --> S_CHECK{"Settle Complete?"}
+    S_CHECK -->|No| HOLD_PLATEAU
+    S_CHECK -->|Yes| STABLE_RETURN["Set is_drain_cycle = False\nSet is_stable_plateau = True"]
+
+    LEVEL_CHECK -->|No: Continuous Submersion| RO_CHECK{"Is Raw EC < 0.4 mS/cm & Stable for >15 mins?"}
+    RO_CHECK -->|Yes: Fresh RO Water Refill| RO_ADAPT["Adapt Plateau to RO Baseline\n(Enable Dosing from Scratch)"]
+    RO_CHECK -->|No| NORMAL_READING["Maintain Active Plateau\nNormal Adaptive Dosing Allowed"]
 ```
 
 ---
