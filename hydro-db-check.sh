@@ -53,8 +53,16 @@ echo "--- 5. Recent System Warnings & Danger Logs (Last 5) ---"
 sqlite3 -header -column "$DB_PATH" "SELECT timestamp, category, message FROM event_log WHERE category IN ('WARNING', 'DANGER', 'ALARM') ORDER BY id DESC LIMIT 5;"
 echo ""
 
-echo "--- 6. Recent Pump Dosing Actions (Last 5) ---"
+echo "--- 6. Solution Tanks Inventory ---"
+sqlite3 -header -column "$DB_PATH" "SELECT tank_id, name, capacity_ml, current_volume_ml, consecutive_blocked_attempts FROM solution_tanks ORDER BY tank_id ASC;"
+echo ""
+
+echo "--- 7. Recent Pump Dosing Actions (Last 5) ---"
 sqlite3 -header -column "$DB_PATH" "SELECT timestamp, pump_name, duration, trigger_type FROM pump_log ORDER BY id DESC LIMIT 5;"
+echo ""
+
+echo "--- 8. Database File Sizes & Disk Usage ---"
+ls -lh "$DB_PATH"* 2>/dev/null || echo "No database files matched."
 echo ""
 
 echo "=============================================================================="
