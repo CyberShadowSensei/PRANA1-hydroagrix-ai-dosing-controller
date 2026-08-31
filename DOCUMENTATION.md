@@ -3,7 +3,7 @@
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
 > **Last Updated:** August 2026  
 > **Repository:** `CyberShadowSensei/hydroagrix-ai-dosing-controller`  
-> **System Status:** Production Ready & Verified (233 Automated Tests Passing: 204 Backend Pytest + 29 Frontend Vitest)
+> **System Status:** Production Ready & Verified (237 Automated Tests Passing: 206 Backend Pytest + 31 Frontend Vitest)
 
 
 ---
@@ -256,14 +256,23 @@ The system includes a target database diagnostic script located at `~/hydro-db-c
 - Computes the green leaf pixel ratio using the YOLO stage classifier or HSV color space fallback.
 - The detected stage is saved to the database and broadcasted as informational metadata (`ml_info` / `ml_stage`) over Socket.IO, while the scheduled grow cycle timeline retains strict precedence for active dosing limits.
 
-### 6.3 Flood-and-Drain Circulation Plateau Tracking & RO Water Handling (`backend/sensors.py`)
-In circulating / flood-and-drain hydroponic setups, water periodically drops into crop channels (e.g., 20 mins drain, 10 mins return), leaving the reservoir EC probe temporarily exposed to air (reading 0.3–0.5 mS/cm).
-- **Plateau Tracker (`CirculationPlateauTracker`)**: Automatically detects circulation drop events when EC drops by $>0.6\text{ mS/cm}$ from the established submerged baseline. Holds `effective_value = plateau_ec`, sets `is_drain_cycle = True`, and suppresses false low-EC alarms.
+### 6.3 Periodic Interval Circulation Auto-Detection & Smart Context Alerts (`backend/sensors.py`)
+In circulating / flood-and-drain hydroponic setups, water periodically rotates into crop channels (e.g., 20 mins drain, 10 mins return), leaving the reservoir EC probe temporarily exposed to air (reading 0.3–0.5 mS/cm).
+
+- **Interval Verification Policy ("Never Keep the User in Darkness")**: To prevent masking real reservoir drops or broken probes, the system enforces a strict pattern detection policy (`CyclePatternDetector` inside `CirculationPlateauTracker`).
+  - **States**: `STATIC` (default single tank/DWC), `DETECTING_PATTERN` (first cycle observed), `CONFIRMED_PERIODIC` (validated recurring circulation), and `RETURN_TIMEOUT_FAULT` (probe dry $>35$ mins).
+  - **Confirmation Math**: Requires $\ge 2$ recurring cycles with timing variance $\le 35\%$ ($|d_1 - d_2|/\max(d_1, d_2) \le 0.35$), realistic drain duration ($180\text{s} \le T_{\text{drain}} \le 2700\text{s}$), and return EC matching prior plateau ($\pm 0.40\text{ mS/cm}$).
+  - In unconfirmed `STATIC` mode, sensor drops are exposed directly as `LOW_EC_ALERT` without faking a held plateau.
 - **Settle Delay**: When water returns to the reservoir, requires 20 consecutive readings (10 seconds) within 0.3 mS/cm of the plateau before marking the reading as stable (`is_stable_plateau = True`).
 - **Dosing Lock & Adaptive Calibration Safety**:
   - `check_and_adjust_sensors()` locks out dosing during drain cycles (`is_drain_cycle == True`).
   - `_evaluate_last_dose()` defers self-tuning evaluation until the next stable plateau, preventing corrupted exponential moving average factors from dry probe readings.
 - **Fresh RO Water Adaptation**: If a reservoir is emptied and refilled with pure RO water (~0.0–0.4 mS/cm), the tracker observes steady flat readings ($\Delta < 0.05$) for $\ge 600$ ticks ($>15$ mins), automatically adapting the plateau down to the fresh RO baseline and enabling normal automated nutrient dosing from scratch.
+- **Context-Aware Smart Alerts (`Dashboard.jsx`)**:
+  - Evaluates live supply tank inventory (Tanks 1–4) and circulation status before alerting.
+  - When EC reads low during an active drain cycle, suppresses false "Add nutrient solution" alarms.
+  - When pH or EC is out of bounds and corresponding dosing tanks are depleted ($< 50\text{mL}$), alerts grower with specific root cause (e.g. *"Tank 3 (pH UP) is empty: Auto-dosing is blocked until refilled"*).
+  - If water fails to return within 35 minutes, raises a high-priority alert: *"Water Return Timeout: Drainage probe has remained dry for over 35 minutes. Inspect siphon/circulation pump."*
 
 ---
 

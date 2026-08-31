@@ -21,7 +21,8 @@ from dosing import check_and_adjust_sensors, _evaluate_last_dose
 class TestCirculationPlateauTracker(unittest.TestCase):
 
     def setUp(self):
-        self.tracker = CirculationPlateauTracker(drop_delta=0.6, settle_ticks=5, ro_steady_ticks=10)
+        # settle_ticks=5, ro_steady_ticks=10, max_drain_timeout_sec=30
+        self.tracker = CirculationPlateauTracker(drop_delta=0.6, settle_ticks=5, ro_steady_ticks=10, max_drain_timeout_sec=30)
 
     def test_initial_reading_establishes_plateau(self):
         res = self.tracker.process_reading(2.2, "OK")
@@ -29,19 +30,48 @@ class TestCirculationPlateauTracker(unittest.TestCase):
         self.assertEqual(res["effective_value"], 2.2)
         self.assertFalse(res["is_drain_cycle"])
         self.assertTrue(res["is_stable_plateau"])
+        self.assertEqual(res["pattern_status"], "STATIC")
         self.assertEqual(res["status"], "OK")
 
-    def test_drain_cycle_drop_detected_and_holds_plateau(self):
+    def test_single_drop_without_prior_cycles_does_not_falsely_hold_plateau(self):
         # 1. Establish plateau at 2.2
         self.tracker.process_reading(2.2, "OK")
         
-        # 2. Water drains to channels -> sensor reads 0.4 in air
+        # 2. In unconfirmed static mode, a drop is flagged as low EC (effective_value = raw_ec)
         res = self.tracker.process_reading(0.4, "OK")
         self.assertEqual(res["value"], 0.4)
-        self.assertEqual(res["effective_value"], 2.2)  # Holds last plateau
+        self.assertEqual(res["effective_value"], 0.4)  # Does not fake a 2.2 plateau on unconfirmed drop
         self.assertTrue(res["is_drain_cycle"])
         self.assertFalse(res["is_stable_plateau"])
-        self.assertEqual(res["status"], "DRAIN_CYCLE")
+        self.assertEqual(res["status"], "LOW_EC_ALERT")
+
+    def test_two_consecutive_consistent_cycles_confirm_periodic_circulation(self):
+        # Cycle 1: Establish 2.2 -> Drain (fake 1000s duration) -> Return to 2.2
+        self.tracker.process_reading(2.2, "OK")
+        self.tracker.process_reading(0.4, "OK")
+        # Fake drain start time 1200 seconds ago
+        self.tracker.drain_start_time = time.time() - 1200
+        # Settle return
+        for _ in range(5):
+            self.tracker.process_reading(2.2, "OK")
+        
+        self.assertEqual(len(self.tracker.completed_cycles), 1)
+        self.assertEqual(self.tracker.pattern_status, "DETECTING_PATTERN")
+
+        # Cycle 2: Drain again -> Return
+        self.tracker.process_reading(0.4, "OK")
+        self.tracker.drain_start_time = time.time() - 1150  # ~1150s drain (within 35% variance of 1200s)
+        for _ in range(5):
+            res = self.tracker.process_reading(2.2, "OK")
+        
+        self.assertEqual(len(self.tracker.completed_cycles), 2)
+        self.assertEqual(self.tracker.pattern_status, "CONFIRMED_PERIODIC")
+
+        # Cycle 3 (in confirmed periodic mode): Drain phase now safely holds plateau!
+        res_drain = self.tracker.process_reading(0.4, "OK")
+        self.assertEqual(res_drain["value"], 0.4)
+        self.assertEqual(res_drain["effective_value"], 2.2)  # Holds plateau in confirmed periodic mode
+        self.assertEqual(res_drain["status"], "DRAIN_CYCLE")
 
     def test_water_return_requires_settle_ticks_before_stable(self):
         # 1. Establish plateau at 2.2 and drain
@@ -65,10 +95,9 @@ class TestCirculationPlateauTracker(unittest.TestCase):
         self.tracker.process_reading(2.2, "OK")
         
         # 2. Grower flushes and fills tank with pure RO water (0.25 mS/cm)
-        # Feed 10 steady ticks at 0.25 mS/cm (matching ro_steady_ticks=10)
         for i in range(9):
             res = self.tracker.process_reading(0.25, "OK")
-            self.assertTrue(res["is_drain_cycle"])  # Initially treated as drain
+            self.assertTrue(res["is_drain_cycle"])
         
         # On the 10th steady tick, tracker recognizes fresh RO water batch
         res = self.tracker.process_reading(0.25, "OK")
@@ -76,6 +105,15 @@ class TestCirculationPlateauTracker(unittest.TestCase):
         self.assertTrue(res["is_stable_plateau"])
         self.assertEqual(res["effective_value"], 0.25)
         self.assertEqual(self.tracker.plateau_ec, 0.25)
+
+    def test_drain_timeout_fault_triggered_when_water_fails_to_return(self):
+        self.tracker.process_reading(2.2, "OK")
+        self.tracker.process_reading(0.4, "OK")
+        
+        # Simulate dry probe lasting > max_drain_timeout_sec (30s)
+        self.tracker.drain_start_time = time.time() - 35
+        res = self.tracker.process_reading(0.4, "OK")
+        self.assertEqual(res["pattern_status"], "RETURN_TIMEOUT_FAULT")
 
 
 class TestDosingDrainCycleGate(unittest.TestCase):

@@ -63,6 +63,7 @@ def fetch_loop():
                     'effective_ec': tds_res.get('effective_tds', tds_res.get('tds_value')),
                     'is_drain_cycle': tds_res.get('is_drain_cycle', False),
                     'is_stable_plateau': tds_res.get('is_stable_plateau', True),
+                    'pattern_status': tds_res.get('pattern_status', 'STATIC'),
                     'temperature': th_res.get('temperature'),
                     'humidity': th_res.get('humidity'),
                     'pumps': {f"pump{k}": v for k, v in hal.pump_status.items()}

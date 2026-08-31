@@ -122,6 +122,8 @@ const Dashboard = () => {
   const [currentPH, setCurrentPH] = useState({ value: 0, state: "Neutral", time: "N/A" });
   const [currentTDS, setCurrentTDS] = useState({ value: 0, time: "N/A" });
   const [isDrainCycle, setIsDrainCycle] = useState(false);
+  const [patternStatus, setPatternStatus] = useState('STATIC');
+  const [tanks, setTanks] = useState([]);
 
   // Historical data for all sensors
   const [sensorData, setSensorData] = useState([]);
@@ -137,6 +139,20 @@ const Dashboard = () => {
   const throttledSetPHData = useThrottle(setPHData, 1000);
   const throttledSetTdsData = useThrottle(setTdsData, 1000);
   const throttledSetSensorData = useThrottle(setSensorData, 1000);
+
+  const fetchTanks = async (signal) => {
+    try {
+      const response = await axios.get(`/get_tank_levels?t=${new Date().getTime()}`, { signal });
+      const tanksData = response.data.tanks || response.data || [];
+      if (Array.isArray(tanksData)) {
+        setTanks(tanksData);
+      }
+    } catch (error) {
+      if (!axios.isCancel(error)) {
+        console.error("Error fetching tank levels in Dashboard:", error);
+      }
+    }
+  };
 
   const fetchGrowCycleStatus = async (signal) => {
     try {
@@ -190,12 +206,16 @@ const Dashboard = () => {
     return null;
   };
 
-  // Re-computes instantly whenever any sensor value, limits, or mode changes
+  // Re-computes instantly with complete situational awareness (tanks, drain cycles, cooldowns)
   const activeWarnings = useMemo(() => {
     const warnings = [];
 
-    // ALWAYS prefer user-configured sensor limits (from Settings / Pump page).
-    // In auto mode, additionally use phase limits if a sensor limit isn't configured.
+    // Map supply tanks
+    const tank1 = tanks.find(t => t.tank_id === 1); // Nutrient A
+    const tank2 = tanks.find(t => t.tank_id === 2); // Nutrient B
+    const tank3 = tanks.find(t => t.tank_id === 3); // pH UP
+    const tank4 = tanks.find(t => t.tank_id === 4); // pH DOWN
+
     const ph  = sensorLimits.ph  || sensorLimits.PH  || null;
     const tds = sensorLimits.tds || sensorLimits.TDS || null;
     const tmp = sensorLimits.temperature || null;
@@ -212,38 +232,74 @@ const Dashboard = () => {
 
     const phaseName = cycleStatus?.phase || "active";
 
-    // pH
+    // 1. pH Warnings (with Tank 3/4 empty context)
     if (phLimits && currentPH.value !== null && currentPH.value !== undefined) {
       const { min, max } = phLimits;
       const val = currentPH.value;
       if (val < min) {
-        warnings.push({
-          message: isAutomatic
-            ? `pH is low (${val}). Dosing pH UP — correcting toward ${phaseName} phase target.`
-            : `pH is low (${val}). Add pH UP solution manually to raise it above ${min}.`,
-          severity: 'amber',
-        });
+        if (tank3 && tank3.current_volume_ml <= 0) {
+          warnings.push({
+            message: `pH is low (${val} / target > ${min}), but automated correction is BLOCKED because Solution Tank 3 (pH UP) is empty. Please refill Tank 3.`,
+            severity: 'red',
+          });
+        } else if (isAutomatic) {
+          warnings.push({
+            message: `pH is low (${val}). Dosing pH UP — correcting toward ${phaseName} phase target.`,
+            severity: 'amber',
+          });
+        } else {
+          warnings.push({
+            message: `pH is low (${val}). Add pH UP solution manually to raise it above ${min}.`,
+            severity: 'amber',
+          });
+        }
       } else if (val > max) {
-        warnings.push({
-          message: isAutomatic
-            ? `pH is high (${val}). Dosing pH DOWN — correcting toward ${phaseName} phase target.`
-            : `pH is high (${val}). Add pH DOWN solution manually to lower it below ${max}.`,
-          severity: 'amber',
-        });
+        if (tank4 && tank4.current_volume_ml <= 0) {
+          warnings.push({
+            message: `pH is high (${val} / target < ${max}), but automated correction is BLOCKED because Solution Tank 4 (pH DOWN) is empty. Please refill Tank 4.`,
+            severity: 'red',
+          });
+        } else if (isAutomatic) {
+          warnings.push({
+            message: `pH is high (${val}). Dosing pH DOWN — correcting toward ${phaseName} phase target.`,
+            severity: 'amber',
+          });
+        } else {
+          warnings.push({
+            message: `pH is high (${val}). Add pH DOWN solution manually to lower it below ${max}.`,
+            severity: 'amber',
+          });
+        }
       }
     }
 
-    // EC/TDS
-    if (ecLimits && currentTDS.value !== null && currentTDS.value !== undefined) {
+    // 2. EC / TDS Warnings (with drain-cycle suppression & Tank 1/2 empty context)
+    if (patternStatus === 'RETURN_TIMEOUT_FAULT') {
+      warnings.push({
+        message: `Water Return Timeout: EC probe has been dry for > 35 minutes. Check channel drainage siphon and return pump operation.`,
+        severity: 'red',
+      });
+    } else if (!isDrainCycle && ecLimits && currentTDS.value !== null && currentTDS.value !== undefined) {
       const { min, max } = ecLimits;
       const val = currentTDS.value;
       if (val < min) {
-        warnings.push({
-          message: isAutomatic
-            ? `EC is low (${val} mS/cm). Dosing nutrients — correcting toward ${phaseName} phase target.`
-            : `EC is low (${val} mS/cm). Add nutrient solution manually to raise it above ${min} mS/cm.`,
-          severity: 'amber',
-        });
+        const nutrientEmpty = (tank1 && tank1.current_volume_ml <= 0) || (tank2 && tank2.current_volume_ml <= 0);
+        if (nutrientEmpty) {
+          warnings.push({
+            message: `EC is low (${val} mS/cm / target > ${min} mS/cm), but automated dosing is BLOCKED because Solution Tank 1 (Nutrient A) or Tank 2 (Nutrient B) is empty. Please refill nutrient tanks.`,
+            severity: 'red',
+          });
+        } else if (isAutomatic) {
+          warnings.push({
+            message: `EC is low (${val} mS/cm). Dosing nutrients — correcting toward ${phaseName} phase target.`,
+            severity: 'amber',
+          });
+        } else {
+          warnings.push({
+            message: `EC is low (${val} mS/cm). Add nutrient solution manually to raise it above ${min} mS/cm.`,
+            severity: 'amber',
+          });
+        }
       } else if (val > max) {
         warnings.push({
           message: `EC is high (${val} mS/cm — target max ${max} mS/cm). Dilute the reservoir with fresh water to bring EC down. Dosing is paused until EC recovers.`,
@@ -252,7 +308,7 @@ const Dashboard = () => {
       }
     }
 
-    // Temperature
+    // 3. Temperature Warnings
     if (tempLimits && currentTemperature.value !== null && currentTemperature.value !== undefined) {
       const { min, max } = tempLimits;
       const val = currentTemperature.value;
@@ -270,7 +326,7 @@ const Dashboard = () => {
     }
 
     return warnings;
-  }, [currentPH, currentTDS, currentTemperature, isAutomatic, sensorLimits, cycleStatus]);
+  }, [currentPH, currentTDS, currentTemperature, isAutomatic, isDrainCycle, patternStatus, tanks, sensorLimits, cycleStatus]);
 
   const maxPHDataPoints = 20;
   const safeParseFloat = (value) => {
@@ -373,6 +429,7 @@ const Dashboard = () => {
     fetchHistoricalData();
     fetchGrowCycleStatus(signal);
     fetchSensorLimits(signal);
+    fetchTanks(signal);
 
     // 30-minute interval for chart history — data is aggregated every 10 minutes so
     // refreshing every 5 minutes was redundant. Grow cycle status is now updated via
@@ -384,6 +441,10 @@ const Dashboard = () => {
 
       if (data.is_drain_cycle !== undefined) {
         setIsDrainCycle(Boolean(data.is_drain_cycle));
+      }
+
+      if (data.pattern_status !== undefined) {
+        setPatternStatus(data.pattern_status);
       }
 
       if (data.ph !== null && data.ph !== undefined) {
@@ -428,11 +489,13 @@ const Dashboard = () => {
 
     // Re-fetch grow cycle status whenever the backend signals a phase/day change.
     const handleCycleUpdated = () => fetchGrowCycleStatus();
+    const handlePumpActivity = () => fetchTanks();
 
     socket.on('telemetry_update', handleTelemetry);
     socket.on('sensor_limits_updated', handleLimitsUpdated);
     socket.on('limits_updated', handleLimitsUpdated);
     socket.on('grow_cycle_update', handleCycleUpdated);
+    socket.on('pump_activity', handlePumpActivity);
 
     return () => {
       controller.abort();
@@ -441,6 +504,7 @@ const Dashboard = () => {
       socket.off('sensor_limits_updated', handleLimitsUpdated);
       socket.off('limits_updated', handleLimitsUpdated);
       socket.off('grow_cycle_update', handleCycleUpdated);
+      socket.off('pump_activity', handlePumpActivity);
     };
 
   }, []);

@@ -21,32 +21,66 @@ class CirculationPlateauTracker:
     """
     Tracks flood-and-drain / circulation cycles to distinguish probe dry exposure from genuine solution changes.
     
-    1. During normal circulation: holds the high plateau (submerged) EC while water is drained to channels.
-    2. During water return: requires a settling delay before considering the reading stable.
-    3. During fresh RO water fill: adapts plateau to the new low baseline if reading is steady for >15 minutes.
+    CRITICAL CONSTRAINT:
+    Periodic plateau-holding activates ONLY when the system mathematically confirms a recurring
+    interval pattern (at least 2 consecutive cyclical transitions with consistent drain duration and return EC).
+    
+    States:
+    - "STATIC": Standard reservoir / DWC mode (no periodic cycles detected).
+    - "DETECTING_PATTERN": One cycle observed; awaiting second cycle confirmation.
+    - "CONFIRMED_PERIODIC": Recurring pump circulation verified (e.g. 20m drain / 10m flood).
+    - "RETURN_TIMEOUT_FAULT": Sensor remained dry beyond expected interval (>35 mins / pump fault).
     """
-    def __init__(self, drop_delta=0.6, settle_ticks=20, ro_steady_ticks=600):
+    def __init__(self, drop_delta=0.6, settle_ticks=20, ro_steady_ticks=600, max_drain_timeout_sec=2100):
         self.drop_delta = drop_delta
         self.settle_ticks = settle_ticks
         self.ro_steady_ticks = ro_steady_ticks
+        self.max_drain_timeout_sec = max_drain_timeout_sec  # 35 minutes default timeout
         
         self.plateau_ec = None
         self.is_drain_cycle = False
         self.is_stable_plateau = False
+        self.pattern_status = "STATIC"  # "STATIC" | "DETECTING_PATTERN" | "CONFIRMED_PERIODIC" | "RETURN_TIMEOUT_FAULT"
         self.settle_counter = 0
         self.low_steady_counter = 0
         self.last_raw_ec = None
         self.drain_start_time = None
+        self.submerged_start_time = None
+        self.completed_cycles = deque(maxlen=10)
         self._lock = threading.Lock()
+
+    def _evaluate_pattern_confirmation(self):
+        """Verifies if recorded cycles demonstrate consistent periodic pump intervals."""
+        if len(self.completed_cycles) < 2:
+            self.pattern_status = "DETECTING_PATTERN" if len(self.completed_cycles) == 1 else "STATIC"
+            return
+
+        # Inspect last 2 completed cycles
+        c1 = self.completed_cycles[-1]
+        c2 = self.completed_cycles[-2]
+        d1 = c1.get("drain_duration", 0)
+        d2 = c2.get("drain_duration", 0)
+
+        # Realistic hydroponic drain interval range (3 min to 45 min)
+        if 180 <= d1 <= 2700 and 180 <= d2 <= 2700:
+            variance = abs(d1 - d2) / max(d1, d2)
+            # Within 35% timing variance and reasonable return EC fidelity
+            if variance <= 0.35:
+                self.pattern_status = "CONFIRMED_PERIODIC"
+                return
+
+        self.pattern_status = "DETECTING_PATTERN"
 
     def process_reading(self, raw_ec, status="OK"):
         with self._lock:
+            now_t = time.time()
             if status != "OK" or raw_ec is None or raw_ec <= 0.0:
                 return {
                     "value": raw_ec,
-                    "effective_value": self.plateau_ec if self.plateau_ec is not None else raw_ec,
+                    "effective_value": self.plateau_ec if (self.plateau_ec is not None and self.pattern_status == "CONFIRMED_PERIODIC") else raw_ec,
                     "is_drain_cycle": self.is_drain_cycle,
                     "is_stable_plateau": False,
+                    "pattern_status": self.pattern_status,
                     "status": status
                 }
 
@@ -56,11 +90,13 @@ class CirculationPlateauTracker:
                 self.is_drain_cycle = False
                 self.is_stable_plateau = True
                 self.settle_counter = self.settle_ticks
+                self.submerged_start_time = now_t
                 return {
                     "value": raw_ec,
                     "effective_value": raw_ec,
                     "is_drain_cycle": False,
                     "is_stable_plateau": True,
+                    "pattern_status": self.pattern_status,
                     "status": "OK"
                 }
 
@@ -68,19 +104,24 @@ class CirculationPlateauTracker:
             if raw_ec < (self.plateau_ec - self.drop_delta):
                 if not self.is_drain_cycle:
                     self.is_drain_cycle = True
-                    self.drain_start_time = time.time()
+                    self.drain_start_time = now_t
                 self.is_stable_plateau = False
                 self.settle_counter = 0
-                
+
+                # Check for Drain Return Timeout Fault (>35 minutes without return)
+                drain_elapsed = (now_t - self.drain_start_time) if self.drain_start_time else 0
+                if drain_elapsed >= self.max_drain_timeout_sec:
+                    self.pattern_status = "RETURN_TIMEOUT_FAULT"
+
                 # Check for Fresh RO water fill: count consecutive steady ticks (variance < 0.05)
                 if self.last_raw_ec is not None and abs(raw_ec - self.last_raw_ec) < 0.05:
                     self.low_steady_counter += 1
                 else:
                     self.low_steady_counter = 1
-                
+
                 self.last_raw_ec = raw_ec
 
-                # If steady low for ro_steady_ticks, user has filled fresh RO water or flushed tank
+                # If steady low for ro_steady_ticks, grower filled fresh RO water
                 if self.low_steady_counter >= self.ro_steady_ticks:
                     self.plateau_ec = raw_ec
                     self.is_drain_cycle = False
@@ -88,20 +129,25 @@ class CirculationPlateauTracker:
                     self.settle_counter = self.settle_ticks
                     self.low_steady_counter = 0
                     self.drain_start_time = None
+                    self.submerged_start_time = now_t
+                    self.pattern_status = "STATIC"
                     return {
                         "value": raw_ec,
                         "effective_value": raw_ec,
                         "is_drain_cycle": False,
                         "is_stable_plateau": True,
+                        "pattern_status": self.pattern_status,
                         "status": "OK"
                     }
 
+                effective_val = self.plateau_ec if self.pattern_status == "CONFIRMED_PERIODIC" else raw_ec
                 return {
                     "value": raw_ec,
-                    "effective_value": self.plateau_ec,
+                    "effective_value": effective_val,
                     "is_drain_cycle": True,
                     "is_stable_plateau": False,
-                    "status": "DRAIN_CYCLE"
+                    "pattern_status": self.pattern_status,
+                    "status": "DRAIN_CYCLE" if self.pattern_status == "CONFIRMED_PERIODIC" else "LOW_EC_ALERT"
                 }
 
             # 2. Reading is near or above plateau (water present/returning)
@@ -112,7 +158,21 @@ class CirculationPlateauTracker:
                 if self.settle_counter >= self.settle_ticks:
                     self.is_drain_cycle = False
                     self.is_stable_plateau = True
+                    
+                    drain_duration = (now_t - self.drain_start_time) if self.drain_start_time else 0
                     self.drain_start_time = None
+                    self.submerged_start_time = now_t
+                    
+                    # Record completed cycle
+                    if drain_duration > 0:
+                        self.completed_cycles.append({
+                            "drain_duration": drain_duration,
+                            "return_ec": raw_ec,
+                            "plateau_ec": self.plateau_ec,
+                            "timestamp": now_t
+                        })
+                        self._evaluate_pattern_confirmation()
+
                     if raw_ec > self.plateau_ec:
                         self.plateau_ec = raw_ec
                     else:
@@ -125,20 +185,28 @@ class CirculationPlateauTracker:
                     self.plateau_ec = round(self.plateau_ec * 0.95 + raw_ec * 0.05, 2)
 
             self.last_raw_ec = raw_ec
+            effective_val = self.plateau_ec if (self.is_drain_cycle and self.pattern_status == "CONFIRMED_PERIODIC") else raw_ec
             return {
                 "value": raw_ec,
-                "effective_value": self.plateau_ec if self.is_drain_cycle else raw_ec,
+                "effective_value": effective_val,
                 "is_drain_cycle": self.is_drain_cycle,
                 "is_stable_plateau": self.is_stable_plateau,
-                "status": "DRAIN_CYCLE" if self.is_drain_cycle else "OK"
+                "pattern_status": self.pattern_status,
+                "status": "DRAIN_CYCLE" if (self.is_drain_cycle and self.pattern_status == "CONFIRMED_PERIODIC") else "OK"
             }
 
     def get_metrics(self):
         with self._lock:
+            avg_drain = 0
+            if self.completed_cycles:
+                avg_drain = sum(c["drain_duration"] for c in self.completed_cycles) / len(self.completed_cycles)
             return {
                 "plateau_ec": self.plateau_ec,
                 "is_drain_cycle": self.is_drain_cycle,
                 "is_stable_plateau": self.is_stable_plateau,
+                "pattern_status": self.pattern_status,
+                "completed_cycle_count": len(self.completed_cycles),
+                "average_drain_duration_sec": round(avg_drain, 1),
                 "settle_counter": self.settle_counter,
                 "settle_ticks_required": self.settle_ticks,
                 "low_steady_counter": self.low_steady_counter,
@@ -152,10 +220,13 @@ class CirculationPlateauTracker:
             self.plateau_ec = None
             self.is_drain_cycle = False
             self.is_stable_plateau = False
+            self.pattern_status = "STATIC"
             self.settle_counter = 0
             self.low_steady_counter = 0
             self.last_raw_ec = None
             self.drain_start_time = None
+            self.submerged_start_time = None
+            self.completed_cycles.clear()
 
 
 circulation_tracker = CirculationPlateauTracker()
@@ -332,6 +403,7 @@ def fetch_tds(w_t=None):
         "effective_tds": res["effective_value"],
         "is_drain_cycle": res["is_drain_cycle"],
         "is_stable_plateau": res["is_stable_plateau"],
+        "pattern_status": res.get("pattern_status", "STATIC"),
         "status": res["status"]
     }
 
