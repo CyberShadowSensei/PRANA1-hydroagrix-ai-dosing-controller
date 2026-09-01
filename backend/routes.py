@@ -786,10 +786,16 @@ def get_timelapse_route():
         return jsonify({"error": str(e)}), 500
 
 def process_status_mail_check():
-    ph_val = round(live_ph_data[-1]['value'], 2) if live_ph_data and live_ph_data[-1]['status'] == "OK" and live_ph_data[-1]['value'] is not None else None
-    tds_val = round(live_tds_data[-1]['value'], 2) if live_tds_data and live_tds_data[-1]['status'] == "OK" and live_tds_data[-1]['value'] is not None else None
-    t_val = round(live_th_data[-1]['t'], 1) if live_th_data and live_th_data[-1]['status'] == "OK" and live_th_data[-1]['t'] is not None else None
-    h_val = round(live_th_data[-1]['h'], 1) if live_th_data and live_th_data[-1]['status'] == "OK" and live_th_data[-1]['h'] is not None else None
+    from sensors import circulation_tracker
+    if circulation_tracker.is_drain_cycle:
+        # Reservoir water is temporarily out rotating in crop channels.
+        # Suppress emergency disconnection alarms during normal drain circulation.
+        return
+
+    ph_val = round(live_ph_data[-1]['value'], 2) if live_ph_data and live_ph_data[-1]['status'] in ("OK", "DRAIN_CYCLE") and live_ph_data[-1]['value'] is not None else None
+    tds_val = round(live_tds_data[-1]['value'], 2) if live_tds_data and live_tds_data[-1]['status'] in ("OK", "DRAIN_CYCLE") and live_tds_data[-1]['value'] is not None else None
+    t_val = round(live_th_data[-1]['t'], 1) if live_th_data and live_th_data[-1]['status'] in ("OK", "DRAIN_CYCLE") and live_th_data[-1]['t'] is not None else None
+    h_val = round(live_th_data[-1]['h'], 1) if live_th_data and live_th_data[-1]['status'] in ("OK", "DRAIN_CYCLE") and live_th_data[-1]['h'] is not None else None
 
     if not any(v is not None for v in (ph_val, tds_val, t_val, h_val)):
         return

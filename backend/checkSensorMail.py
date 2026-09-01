@@ -33,10 +33,10 @@ class SensorMonitor:
         self.email_config = self.load_email_config()
         
         self.sensor_states = {
-            'temperature': {'is_faulted': False, 'last_notification': None, 'fault_start': None, 'consecutive_alerts': 0},
-            'humidity':    {'is_faulted': False, 'last_notification': None, 'fault_start': None, 'consecutive_alerts': 0},
-            'tds':         {'is_faulted': False, 'last_notification': None, 'fault_start': None, 'consecutive_alerts': 0},
-            'ph':          {'is_faulted': False, 'last_notification': None, 'fault_start': None, 'consecutive_alerts': 0}
+            'temperature': {'is_faulted': False, 'last_notification': None, 'last_recovery_sent': None, 'fault_start': None, 'consecutive_alerts': 0},
+            'humidity':    {'is_faulted': False, 'last_notification': None, 'last_recovery_sent': None, 'fault_start': None, 'consecutive_alerts': 0},
+            'tds':         {'is_faulted': False, 'last_notification': None, 'last_recovery_sent': None, 'fault_start': None, 'consecutive_alerts': 0},
+            'ph':          {'is_faulted': False, 'last_notification': None, 'last_recovery_sent': None, 'fault_start': None, 'consecutive_alerts': 0}
         }
         
         self.notification_cooldown = 4  # Hours between repeated alerts for same sensor
@@ -153,19 +153,27 @@ class SensorMonitor:
             sensor_state = self.sensor_states.get(sensor_name)
             
             # Enforce cooldown — don't spam for the same sensor unless bypassed
-            if sensor_state and not bypass_cooldown and sensor_state['last_notification']:
-                consecutive = sensor_state.get('consecutive_alerts', 0)
-                if consecutive == 1:
-                    cooldown_hours = 6
-                elif consecutive >= 2:
-                    cooldown_hours = 24
-                else:
-                    cooldown_hours = 0
-                    
-                if (current_time - sensor_state['last_notification']).total_seconds() < cooldown_hours * 3600:
-                    print(f"DEBUG: Email alert for {sensor_name} skipped due to {cooldown_hours}h cooldown")
-                    self._log_audit(subject_text, recipients_str, severity, "SKIPPED_COOLDOWN", sensor_name)
-                    return
+            if sensor_state and not bypass_cooldown:
+                if severity == "RECOVERY":
+                    # RECOVERY alerts have a minimum 1-hour cooldown to prevent flapping spam
+                    if sensor_state.get('last_recovery_sent'):
+                        if (current_time - sensor_state['last_recovery_sent']).total_seconds() < 3600:
+                            print(f"DEBUG: Email recovery alert for {sensor_name} skipped due to 1h recovery cooldown")
+                            self._log_audit(subject_text, recipients_str, severity, "SKIPPED_COOLDOWN", sensor_name)
+                            return
+                elif sensor_state.get('last_notification'):
+                    consecutive = sensor_state.get('consecutive_alerts', 0)
+                    if consecutive == 1:
+                        cooldown_hours = 6
+                    elif consecutive >= 2:
+                        cooldown_hours = 24
+                    else:
+                        cooldown_hours = 0
+                        
+                    if (current_time - sensor_state['last_notification']).total_seconds() < cooldown_hours * 3600:
+                        print(f"DEBUG: Email alert for {sensor_name} skipped due to {cooldown_hours}h cooldown")
+                        self._log_audit(subject_text, recipients_str, severity, "SKIPPED_COOLDOWN", sensor_name)
+                        return
             
 
             from email.utils import formatdate, make_msgid
@@ -278,6 +286,8 @@ class SensorMonitor:
                         sensor_state['is_faulted'] = True
                         sensor_state['fault_start'] = current_time
                 elif severity == "RECOVERY":
+                    sensor_state['last_recovery_sent'] = current_time
+                    sensor_state['is_faulted'] = False
                     sensor_state['consecutive_alerts'] = 0
             
             print(f"EMAIL {severity} alert sent for {sensor_name}: {error_message}")
@@ -379,6 +389,17 @@ class SensorMonitor:
             state['consecutive_null'] = state.get('consecutive_null', 0) + 1
             if state['consecutive_null'] < min_consecutive:
                 return
+            
+            current_time = datetime.now()
+            is_recent = state.get('last_notification') and (current_time - state['last_notification']).total_seconds() < 7200
+            if is_recent:
+                recipients_raw = self.email_config.get('recipient_email') or self.email_config.get('receiver_email', '')
+                recipients_str = ", ".join([r.strip() for r in recipients_raw.replace(';', ',').split(',') if r.strip()])
+                print(f"DEBUG: Email alert for {sensor_name} skipped due to anti-flapping protection (<2h cooldown)")
+                self._log_audit(f"[DANGER] Critical System Alert: {sensor_name.upper()} Out of Bounds", recipients_str, "DANGER", "SKIPPED_COOLDOWN", sensor_name)
+                self._log_to_db(f"{sensor_name.upper()}_NULL", "DANGER", f"Sensor returned NULL - possible hardware disconnection")
+                return
+            
             is_new_fault = not state['is_faulted']
             self.send_email_alert(sensor_name, "Sensor has no reading. A wire might be disconnected.", "DANGER", bypass_cooldown=is_new_fault)
             self._log_to_db(f"{sensor_name.upper()}_NULL", "DANGER", f"Sensor returned NULL - possible hardware disconnection")
@@ -401,6 +422,17 @@ class SensorMonitor:
             if state['consecutive_danger'] < min_consecutive:
                 return
             msg = f"The number is {value}. The safe numbers are {danger['min']} to {danger['max']}."
+            
+            current_time = datetime.now()
+            is_recent = state.get('last_notification') and (current_time - state['last_notification']).total_seconds() < 7200
+            if is_recent:
+                recipients_raw = self.email_config.get('recipient_email') or self.email_config.get('receiver_email', '')
+                recipients_str = ", ".join([r.strip() for r in recipients_raw.replace(';', ',').split(',') if r.strip()])
+                print(f"DEBUG: Email alert for {sensor_name} skipped due to anti-flapping protection (<2h cooldown)")
+                self._log_audit(f"[DANGER] Critical System Alert: {sensor_name.upper()} Out of Bounds", recipients_str, "DANGER", "SKIPPED_COOLDOWN", sensor_name)
+                self._log_to_db(f"{sensor_name.upper()}_EXTREME", "DANGER", msg, {"value": value})
+                return
+            
             is_new_fault = not state['is_faulted']
             self.send_email_alert(sensor_name, msg, "DANGER", bypass_cooldown=is_new_fault)
             self._log_to_db(f"{sensor_name.upper()}_EXTREME", "DANGER", msg, {"value": value})
@@ -419,7 +451,7 @@ class SensorMonitor:
             if abs_ok:
                 # Sensor recovered fully inside the deadband zone
                 msg = f"Sensor recovered! Current value: {value}"
-                self.send_email_alert(sensor_name, msg, "RECOVERY", bypass_cooldown=True)
+                self.send_email_alert(sensor_name, msg, "RECOVERY", bypass_cooldown=False)
                 self._log_to_db(f"{sensor_name.upper()}_RECOVERY", "RECOVERY", msg, {"value": value})
                 state['is_faulted'] = False
 

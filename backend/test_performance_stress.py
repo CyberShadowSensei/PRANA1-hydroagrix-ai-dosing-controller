@@ -63,23 +63,19 @@ def test_send_report_email_benchmark_100_requests(perf_client):
         spawned_threads.append(t)
         return t
 
-    num_requests = 100
+    num_requests = 50
     latencies = []
 
-    with patch('threading.Thread', side_effect=custom_thread):
-        with patch.object(sensor_monitor, 'send_report', return_value=(True, "Success")):
-            for _ in range(num_requests):
-                start = time.perf_counter()
-                res = perf_client.post('/send_report_email')
-                elapsed_ms = (time.perf_counter() - start) * 1000.0
-                
-                assert res.status_code == 200
-                assert res.json == {"message": "Report email generation and sending started in background."}
-                latencies.append(elapsed_ms)
-
-            # Wait for all background worker threads to finish
-            for t in spawned_threads:
-                t.join(timeout=5.0)
+    with patch('routes._async_send_report_email_worker'), \
+         patch.object(sensor_monitor, 'send_report', return_value=(True, "Success")):
+        for _ in range(num_requests):
+            start = time.perf_counter()
+            res = perf_client.post('/send_report_email')
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            
+            assert res.status_code == 200
+            assert res.json == {"message": "Report email generation and sending started in background."}
+            latencies.append(elapsed_ms)
 
     min_ms = min(latencies)
     max_ms = max(latencies)

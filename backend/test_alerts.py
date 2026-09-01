@@ -135,7 +135,7 @@ def test_check_sensor_reading_deadband_recovery(client, monitor):
         
         # Reading 6.0 is inside deadband bounds [2.7, 11.3] -> recovery triggered
         monitor.check_sensor_reading('ph', 6.0, user_limits={'is_active': True, 'min': 5.5, 'max': 6.5})
-        mock_send_email.assert_called_once_with('ph', 'Sensor recovered! Current value: 6.0', 'RECOVERY', bypass_cooldown=True)
+        mock_send_email.assert_called_once_with('ph', 'Sensor recovered! Current value: 6.0', 'RECOVERY', bypass_cooldown=False)
         mock_log_db.assert_any_call('PH_RECOVERY', 'RECOVERY', 'Sensor recovered! Current value: 6.0', {'value': 6.0})
         assert monitor.sensor_states['ph']['is_faulted'] is False
 
@@ -286,6 +286,66 @@ def test_check_sensor_reading_null_debouncing(client, monitor):
         # Valid reading resets consecutive_null to 0
         monitor.check_sensor_reading('ph', 6.0, user_limits, min_consecutive=10)
         assert monitor.sensor_states['ph']['consecutive_null'] == 0
+
+
+def test_process_status_mail_check_suppressed_during_drain_cycle(client, monitor):
+    """Verify process_status_mail_check suppresses alert evaluation during active drain cycle."""
+    from sensors import circulation_tracker, live_ph_data, live_tds_data
+    from routes import process_status_mail_check
+
+    live_ph_data.clear()
+    live_tds_data.clear()
+    live_ph_data.append({"value": 0.0, "status": "DRAIN_CYCLE", "is_drain_cycle": True, "time": datetime.now()})
+    live_tds_data.append({"value": 0.0, "status": "DRAIN_CYCLE", "is_drain_cycle": True, "time": datetime.now()})
+
+    circulation_tracker.is_drain_cycle = True
+    try:
+        with patch('routes.sensor_monitor', monitor), patch.object(monitor, 'check_sensor_reading') as mock_check:
+            process_status_mail_check()
+            mock_check.assert_not_called()
+    finally:
+        circulation_tracker.is_drain_cycle = False
+
+
+def test_anti_flapping_suppresses_rapid_re_fault_within_2h(client, monitor):
+    """Verify that rapid flapping (fault -> recovery -> fault within 2h) does not bypass notification cooldown."""
+    user_limits = {'min': 5.5, 'max': 6.5, 'is_active': True}
+    sensor = 'ph'
+
+    with patch.object(monitor, '_is_dummy_config', return_value=False), patch('smtplib.SMTP'):
+        # 1. Initial fault -> sends email
+        monitor.check_sensor_reading(sensor, 1.5, user_limits, min_consecutive=1)
+        log1 = EmailAuditLog.query.order_by(EmailAuditLog.id.desc()).first()
+        assert log1.status == "SENT"
+        assert log1.alert_type == "DANGER"
+
+        # 2. Recovery 15 minutes later -> sends recovery email
+        monitor.sensor_states[sensor]['last_notification'] = datetime.now() - timedelta(minutes=15)
+        monitor.check_sensor_reading(sensor, 6.0, user_limits, min_consecutive=1)
+        log2 = EmailAuditLog.query.order_by(EmailAuditLog.id.desc()).first()
+        assert log2.status == "SENT"
+        assert log2.alert_type == "RECOVERY"
+
+        # 3. Flapping fault 20 minutes later (within 2h of previous notification) -> suppressed by cooldown!
+        monitor.check_sensor_reading(sensor, 1.5, user_limits, min_consecutive=1)
+        log3 = EmailAuditLog.query.order_by(EmailAuditLog.id.desc()).first()
+        assert log3.status == "SKIPPED_COOLDOWN"
+
+
+def test_recovery_email_cooldown_1h(client, monitor):
+    """Verify that multiple recovery events within 1 hour are rate-limited to avoid recovery email spam."""
+    sensor = 'tds'
+    with patch.object(monitor, '_is_dummy_config', return_value=False), patch('smtplib.SMTP'):
+        # First recovery -> SENT
+        monitor.send_email_alert(sensor, "TDS recovered", "RECOVERY")
+        log1 = EmailAuditLog.query.order_by(EmailAuditLog.id.desc()).first()
+        assert log1.status == "SENT"
+
+        # Second recovery 10 mins later -> SKIPPED_COOLDOWN
+        monitor.send_email_alert(sensor, "TDS recovered again", "RECOVERY")
+        log2 = EmailAuditLog.query.order_by(EmailAuditLog.id.desc()).first()
+        assert log2.status == "SKIPPED_COOLDOWN"
+
 
 
 
