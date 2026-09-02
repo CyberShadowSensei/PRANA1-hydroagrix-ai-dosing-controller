@@ -1,3 +1,7 @@
+/**
+ * MoistureSensor Component
+ * Substrate and root-zone moisture sensor visualizer and threshold gauge.
+ */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import {
