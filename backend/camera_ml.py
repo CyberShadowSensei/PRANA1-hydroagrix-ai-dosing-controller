@@ -1,3 +1,6 @@
+"""Computer Vision & Crop Stage Classifier
+Integrates V4L2 USB camera captures, HSV canopy segmentation, and YOLO stage analysis.
+"""
 import os
 import cv2
 import time
