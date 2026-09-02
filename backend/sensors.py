@@ -1,3 +1,6 @@
+"""Sensors Engine & Hydrodynamic Circulation Plateau Tracker
+Implements piecewise calibration, Nernst temperature compensation, and circulation detection.
+"""
 import os
 import time
 import json
