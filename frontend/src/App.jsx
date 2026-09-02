@@ -1,3 +1,7 @@
+/**
+ * Root Application Component
+ * Configures React router routes, global HUD layout, and application shell.
+ */
 import { useState, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
