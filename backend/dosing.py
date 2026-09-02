@@ -1,3 +1,6 @@
+"""Adaptive Dosing Engine
+Calculates chemical volumes, inter-dose cooldowns, emergency halts, and flow rate execution.
+"""
 import os
 import time
 import json
