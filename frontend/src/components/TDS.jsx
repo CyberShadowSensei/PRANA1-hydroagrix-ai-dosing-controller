@@ -1,3 +1,7 @@
+/**
+ * TDS Component
+ * Electrical Conductivity / TDS visualizer with dynamic circulation plateau badge support.
+ */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import socket from "../socket";
