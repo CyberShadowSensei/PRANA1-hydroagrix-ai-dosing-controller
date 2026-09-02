@@ -1,3 +1,6 @@
+"""Database Models & Schemas
+Defines SQLite SQLAlchemy models with WAL journaling for sensor telemetry, events, and audits.
+"""
 from datetime import datetime
 import json
 import pytz
