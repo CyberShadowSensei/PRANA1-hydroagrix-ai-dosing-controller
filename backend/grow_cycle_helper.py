@@ -1,3 +1,6 @@
+"""Grow Cycle Progression Helper
+Tracks active plant presets, timeline days, phase transitions, and target limits.
+"""
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
