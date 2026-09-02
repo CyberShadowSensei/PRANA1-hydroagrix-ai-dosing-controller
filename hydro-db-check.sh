@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+# Hydroagrix Production Database Diagnostic & Health Inspection Utility
+# Verifies SQLite integrity, table counts, WAL status, and storage usage.
+
 #!/bin/bash
 # ==============================================================================
 # Hydroagrix AI Dosing Controller - Database Diagnostics & Verification Utility
