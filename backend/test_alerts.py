@@ -1,3 +1,6 @@
+"""Test Suite: Alert Notification Daemon & Anti-Flapping
+Verifies email throttling, backoff progression, drain cycle suppression, and recovery cooldowns.
+"""
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
