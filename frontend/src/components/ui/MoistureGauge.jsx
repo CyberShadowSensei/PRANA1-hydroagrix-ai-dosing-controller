@@ -1,3 +1,7 @@
+/**
+ * MoistureGauge Component
+ * Radial gauge visualizer for root-zone moisture levels.
+ */
 import React from "react";
 import SmoothGauge from "./SmoothGauge";
 
