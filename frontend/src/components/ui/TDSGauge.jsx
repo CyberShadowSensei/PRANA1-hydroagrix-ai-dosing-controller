@@ -1,3 +1,7 @@
+/**
+ * TDSGauge Component
+ * Radial dial gauge displaying EC/TDS concentration with safe range color coding.
+ */
 import React from "react";
 import SmoothGauge from "./SmoothGauge";
 
