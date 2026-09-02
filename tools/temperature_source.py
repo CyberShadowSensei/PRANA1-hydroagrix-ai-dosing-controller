@@ -1,3 +1,6 @@
+"""Temperature Source Fallback Engine
+Implements 4-tier temperature resolution: DS18B20 -> DHT22 offset -> Manual -> Default 25C.
+"""
 #!/usr/bin/env python3
 """
 Dynamic Temperature Fallback Source for EC/TDS compensation.
