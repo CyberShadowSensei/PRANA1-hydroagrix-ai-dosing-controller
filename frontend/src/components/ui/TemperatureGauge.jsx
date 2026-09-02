@@ -1,3 +1,7 @@
+/**
+ * TemperatureGauge Component
+ * Radial gauge rendering water and ambient temperatures.
+ */
 import React from "react";
 import SmoothGauge from "./SmoothGauge";
 
