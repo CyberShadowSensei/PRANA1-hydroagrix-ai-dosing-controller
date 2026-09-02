@@ -14,6 +14,7 @@ const Settings = () => {
   
   const [emailStatus, setEmailStatus] = useState({ type: '', message: '' });
   const [dosingStatus, setDosingStatus] = useState({ type: '', message: '' });
+  const [flowUnit, setFlowUnit] = useState('min');
 
   const [dosingConfig, setDosingConfig] = useState({
     reservoir_volume_l: 10.0,
@@ -192,19 +193,50 @@ const Settings = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">
-                  Pump Flow Rate (mL/s)
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-400">
+                    Motor Flow Rate ({flowUnit === 'min' ? 'mL/min' : 'mL/s'})
+                  </label>
+                  <div className="flex items-center space-x-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setFlowUnit('min')}
+                      className={`px-2 py-0.5 rounded transition-colors ${flowUnit === 'min' ? 'bg-cyan-500/20 text-cyan-400 font-semibold' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                      mL/min
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFlowUnit('sec')}
+                      className={`px-2 py-0.5 rounded transition-colors ${flowUnit === 'sec' ? 'bg-cyan-500/20 text-cyan-400 font-semibold' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                      mL/s
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="number"
                   step="any"
                   min="0.01"
-                  placeholder="0.62"
-                  value={dosingConfig.pump_flow_rate_ml_per_sec ?? ''}
-                  onChange={(e) => setDosingConfig({ ...dosingConfig, pump_flow_rate_ml_per_sec: e.target.value === '' ? '' : Number(e.target.value) })}
+                  placeholder={flowUnit === 'min' ? "e.g. 50" : "e.g. 0.83"}
+                  value={
+                    flowUnit === 'min'
+                      ? (dosingConfig.pump_flow_rate_ml_per_sec ? Math.round(dosingConfig.pump_flow_rate_ml_per_sec * 60 * 100) / 100 : '')
+                      : (dosingConfig.pump_flow_rate_ml_per_sec ?? '')
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? '' : Number(e.target.value);
+                    const secVal = val === '' ? '' : (flowUnit === 'min' ? val / 60.0 : val);
+                    setDosingConfig({ ...dosingConfig, pump_flow_rate_ml_per_sec: secVal });
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 px-4 text-white focus:ring-2 focus:ring-cyan-500 outline-none"
                 />
-                <p className="text-xs text-slate-500 mt-1">Calibrated pump speed in mL/s (e.g., 0.62 mL/s = ~37 mL/min).</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {flowUnit === 'min'
+                    ? `Motor rating: ${dosingConfig.pump_flow_rate_ml_per_sec ? (dosingConfig.pump_flow_rate_ml_per_sec * 60).toFixed(1) : 0} mL/min (= ${(dosingConfig.pump_flow_rate_ml_per_sec || 0).toFixed(3)} mL/s). System handles dosing runtimes automatically.`
+                    : `Motor speed: ${(dosingConfig.pump_flow_rate_ml_per_sec || 0).toFixed(3)} mL/s (= ${((dosingConfig.pump_flow_rate_ml_per_sec || 0) * 60).toFixed(1)} mL/min). System handles dosing runtimes automatically.`
+                  }
+                </p>
               </div>
             </div>
 
