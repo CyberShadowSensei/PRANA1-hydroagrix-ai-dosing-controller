@@ -1,3 +1,6 @@
+"""Flask REST API & WebSocket Event Handlers
+Exposes REST routes for live gauges, telemetry, pump controls, and presets.
+"""
 import os
 import time
 import json
