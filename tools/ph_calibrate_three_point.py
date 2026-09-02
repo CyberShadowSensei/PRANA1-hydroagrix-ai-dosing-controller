@@ -1,3 +1,6 @@
+"""Three-Point pH Piecewise Calibration Tool
+Computes acidic/basic calibration curves from standard pH 4.0, 7.0, and 10.0 buffers.
+"""
 #!/usr/bin/env python3
 """
 Interactive 3-point pH calibration for Grove Base HAT ADC readings.
