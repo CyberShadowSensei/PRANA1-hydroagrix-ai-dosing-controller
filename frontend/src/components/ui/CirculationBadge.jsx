@@ -1,3 +1,7 @@
+/**
+ * CirculationBadge Component
+ * Contextual badge indicating flood-and-drain hydrodynamic circulation status.
+ */
 import React from 'react';
 
 /**
