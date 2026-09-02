@@ -1,3 +1,6 @@
+"""Polynomial & Piecewise EC Curve Fitting Utility
+Performs regression analysis and generates piecewise calibration JSON configuration.
+"""
 #!/usr/bin/env python3
 """
 Fit EC raw-ADC to mS/cm calibration data.
