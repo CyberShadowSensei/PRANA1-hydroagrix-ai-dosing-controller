@@ -1,3 +1,7 @@
+/**
+ * PlantPresets Component
+ * Crop preset selection, multi-stage threshold inspection, and active grow cycle launcher.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { HiPlus, HiPencil, HiTrash, HiCalendar, HiTag, HiChip, HiArrowRight, HiClock, HiX } from 'react-icons/hi';
