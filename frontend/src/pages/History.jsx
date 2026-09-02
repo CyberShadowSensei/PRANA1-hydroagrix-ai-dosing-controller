@@ -1,3 +1,7 @@
+/**
+ * History Page Component
+ * Historical time-series analytics, sensor charting, and event log exploration interface.
+ */
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { capitalizeFirstLetter } from '../hooks/capitalize';
