@@ -1,3 +1,7 @@
+/**
+ * QuickCameraWidget Component
+ * Dashboard thumbnail widget displaying live webcam stream and growth stage badge.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import socket from "../socket";
