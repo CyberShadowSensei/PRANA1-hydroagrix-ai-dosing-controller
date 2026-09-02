@@ -1,3 +1,7 @@
+/**
+ * Dashboard Component
+ * Main operational cockpit featuring dynamic gauges, smart contextual alerts, and system health.
+ */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import axios from "axios";
 import socket from "../socket";
