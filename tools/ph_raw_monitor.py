@@ -1,3 +1,6 @@
+"""Realtime Raw pH Monitoring Utility
+Streams raw ADC voltages, trimmed means, and calibrated pH values for bench testing.
+"""
 #!/usr/bin/env python3
 """
 Raw pH sensor monitor for Grove Base HAT analog inputs.
