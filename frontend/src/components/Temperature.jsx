@@ -1,3 +1,7 @@
+/**
+ * Temperature Component
+ * Water and ambient air temperature telemetry visualizer.
+ */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import socket from "../socket";
