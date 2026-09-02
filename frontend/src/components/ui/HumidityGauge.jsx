@@ -1,3 +1,7 @@
+/**
+ * HumidityGauge Component
+ * Dial gauge representing relative humidity percentages.
+ */
 import React from "react";
 import SmoothGauge from "./SmoothGauge";
 
