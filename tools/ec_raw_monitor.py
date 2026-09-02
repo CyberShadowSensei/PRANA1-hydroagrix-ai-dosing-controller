@@ -1,3 +1,6 @@
+"""Realtime Raw EC Monitoring Utility
+Streams raw ADC samples, stable trimmed means, and temperature-compensated EC values.
+"""
 #!/usr/bin/env python3
 """
 Raw EC sensor monitor for Grove Base HAT analog inputs.
