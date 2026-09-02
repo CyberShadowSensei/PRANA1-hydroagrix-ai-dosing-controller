@@ -1,3 +1,7 @@
+/**
+ * NavBar Component
+ * Main responsive navigation bar with real-time connection status indicator.
+ */
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { HiExternalLink, HiMenu, HiX } from "react-icons/hi";
