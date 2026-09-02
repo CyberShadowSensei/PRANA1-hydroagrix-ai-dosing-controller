@@ -1,3 +1,7 @@
+/**
+ * SmoothGauge Component
+ * High-performance animated SVG gauge with gradient needle physics.
+ */
 import React from 'react';
 
 const SmoothGauge = ({ percent = 0, arcsLength = [1], colors = ["#00FF44"] }) => {
