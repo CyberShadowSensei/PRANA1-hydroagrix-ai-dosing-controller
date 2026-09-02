@@ -1,3 +1,6 @@
+"""Sensor Alert Notification Daemon
+Manages email dispatch, multi-recipient formatting, anti-flapping guards, and recovery rate-limiting.
+"""
 import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
