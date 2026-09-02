@@ -1283,4 +1283,37 @@ Verification:
 - Frontend: 31 passed in 9.74s (100% green across all 31 vitest tests across 9 suites)
 - Total: 240 Automated Tests Passing
 
+## Session Entry: Universal Motor Flow Rate (mL/min & mL/s) Specification & Automated Runtime Derivation
+
+Date: 2026-09-02
+
+Work Area: Frontend Settings UI (`Settings.jsx`), Backend Dosing Configuration (`routes.py`, `dosing.py`), Unit Sync
+
+Classification: Verified (240 Passing Automated Tests: 209 Pytest + 31 Vitest)
+
+Problem Definition:
+- Peristaltic pumps and motor datasheets specify flow rates in standard `mL/min` (e.g., 50 mL/min, 37 mL/min, 100 mL/min).
+- The Settings UI previously only provided a `Pump Flow Rate (mL/s)` input with step restrictions. When users entered their rated motor spec (e.g., "50"), the system mistakenly treated it as 50 mL/s (3000 mL/min).
+- Users were forced to perform manual division ($50 \div 60 = 0.833$) or enter redundant parameters. The system needed to accept direct motor ratings in `mL/min` or `mL/s` and automatically calculate all dosing runtimes, chemical volumes, and tank depletion.
+
+Summary of Implemented Solutions:
+1. **Direct Motor Spec Input in `mL/min` with Unit Switch (`frontend/src/pages/Settings.jsx`)**:
+   - Added an interactive unit toggle `[ mL/min | mL/s ]` defaulting to `mL/min` (standard motor rating).
+   - Instant bidirectional unit conversion: Entering `50 mL/min` automatically displays `(= 0.833 mL/s)`.
+   - Unrestricted arbitrary precision (`step="any"`, `min="0.01"`).
+2. **Automated Mathematical Runtime & Volume Derivations (`backend/dosing.py`)**:
+   - Dosing calculation uses the universal motor speed:
+     $$\text{Runtime (sec)} = \frac{\text{Required Volume (mL)}}{\text{Motor Flow Rate (mL/min)}} \times 60 = \frac{\text{Required Volume (mL)}}{\text{Pump Flow Rate (mL/sec)}}$$
+   - Depletion tracking in `log_pump_action` automatically deducts volume using the exact configured rate.
+3. **Dual-Unit REST API Support (`backend/routes.py`)**:
+   - `/api/dosing_config` GET and POST seamlessly accept and return both `pump_flow_rate_ml_per_min` and `pump_flow_rate_ml_per_sec`, persisting values directly to `system_config.json`.
+4. **Automated Test Coverage**:
+   - Full regression suite verified: 209 Backend Pytest + 31 Frontend Vitest (240 Total Tests passing 100% green).
+
+Verification:
+- Backend: 209 passed in 28.05s (100% green across all 209 pytest tests)
+- Frontend: 31 passed in 4.53s (100% green across all 31 vitest tests across 9 suites)
+- Total: 240 Automated Tests Passing
+
+
 

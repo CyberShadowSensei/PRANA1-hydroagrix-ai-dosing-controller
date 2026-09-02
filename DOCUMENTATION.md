@@ -241,10 +241,11 @@ The system includes a target database diagnostic script located at `~/hydro-db-c
 2. Check Cooldown Timer (default: 15 minutes between dosing cycles)
 3. Check Safety Bounds:
    - If pH < 3.0 or > 10.0 OR EC >= 8.0 mS/cm: Trigger EMERGENCY HALT, stop all pumps, send DANGER email.
-4. Calculate Required Dose Volume:
+4. Calculate Required Dose Volume & Motor Runtime:
    - Volume (mL) = Delta * Reservoir_Volume_L * Nutrient_Factor (mL/L/EC)
-   - Runtime (sec) = Volume (mL) / Pump_Flow_Rate (mL/sec)
+   - Runtime (sec) = (Volume (mL) / Motor_Flow_Rate_mL_per_min) * 60 = Volume (mL) / Pump_Flow_Rate_mL_per_sec
    - Enforce Min Runtime (min_dose_time_sec = 2.0s) & Max Ceiling (max_dose_time_sec = 300.0s)
+   - Note: Growers configure standard motor ratings in mL/min (e.g., 50 mL/min, 37 mL/min) or mL/s via the Settings tab. The system handles all unit conversions and runtime derivations automatically.
 5. Run Pumps safely (_safe_pump_run):
    - Poll cancel_dosing_flag every 0.1s. If operator presses manual stop, pump halts instantly (<100ms).
 6. Auto-Self-Calibration (_evaluate_last_dose):
@@ -285,6 +286,7 @@ In circulating / flood-and-drain hydroponic setups, water periodically rotates i
 | `/api/live_gauges` | `GET` | Returns latest pH, EC, temperature, and humidity gauge readings. |
 | `/api/system_health` | `GET` | Returns full system health, database WAL mode, hardware state, and telemetry status. |
 | `/api/circulation_status` | `GET` | Returns flood-and-drain circulation metrics, plateau EC, and RO baseline status. |
+| `/api/dosing_config` | `GET` / `POST` | Fetches or updates reservoir capacity, universal motor flow rate (`mL/min` and `mL/s`), safety ceilings, and solution tank inventories. |
 | `/sensor/limits` | `GET` | Returns static sensor limits merged with active autonomous crop stage limits. |
 | `/pump/<id>/start` | `POST` | Starts specified pump (`1`-`4`) for duration. Payload: `{"duration": 5}`. |
 | `/pump/<id>/stop` | `POST` | Halts specified pump instantly and cancels active auto-dosing loops. |
@@ -325,7 +327,7 @@ npm install
 
 ### 8.2 Running the Full Automated Test Suite
 ```bash
-# Run backend pytest suite (204 unit, edge-case, integration & stress tests)
+# Run backend pytest suite (209 unit, edge-case, integration & stress tests)
 cd backend
 python -m pytest -v --tb=short -p no:cacheprovider
 
