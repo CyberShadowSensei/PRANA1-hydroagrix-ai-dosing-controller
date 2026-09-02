@@ -36,9 +36,10 @@ def log_pump_action(pump_id, duration, trigger_type):
             if os.path.exists(config_path):
                 with open(config_path, "r") as f:
                     config = json.load(f)
+                    p_flow = float(config.get("pump_flow_rate_ml_per_sec", 37.0 / 60.0))
                     pumps = config.get("pumps", {})
                     pump_config = pumps.get(str(pump_id), {})
-                    pump_flow_rate = float(pump_config.get("flow_rate_ml_per_sec", 37.0 / 60.0))
+                    pump_flow_rate = float(pump_config.get("flow_rate_ml_per_sec", p_flow))
             
             volume_used = duration * pump_flow_rate
             tank = SolutionTanks.query.filter_by(tank_id=pump_id).first()

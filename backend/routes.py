@@ -960,6 +960,17 @@ def dosing_config():
             for k in keys:
                 if k in data:
                     config[k] = data[k]
+            
+            if "pump_flow_rate_ml_per_sec" in data:
+                try:
+                    f_val = float(data["pump_flow_rate_ml_per_sec"])
+                    config["pump_flow_rate_ml_per_sec"] = f_val
+                    if "pumps" in config and isinstance(config["pumps"], dict):
+                        for pid in config["pumps"]:
+                            if isinstance(config["pumps"][pid], dict):
+                                config["pumps"][pid]["flow_rate_ml_per_sec"] = f_val
+                except (ValueError, TypeError):
+                    pass
             dosing.save_system_config(config)
 
                 
@@ -1000,10 +1011,16 @@ def dosing_config():
         nut_b_cap, nut_b_vol = get_tank_info(2)
         ph_u_cap, ph_u_vol = get_tank_info(3)
         ph_d_cap, ph_d_vol = get_tank_info(4)
+
+        flow_rate_val = config.get("pump_flow_rate_ml_per_sec")
+        if flow_rate_val is None and "pumps" in config and isinstance(config["pumps"], dict) and "1" in config["pumps"]:
+            flow_rate_val = config["pumps"]["1"].get("flow_rate_ml_per_sec", 0.6167)
+        elif flow_rate_val is None:
+            flow_rate_val = 1.0
             
         return jsonify({
             "reservoir_volume_l": config.get("reservoir_volume_l", 50.0),
-            "pump_flow_rate_ml_per_sec": config.get("pump_flow_rate_ml_per_sec", 1.0),
+            "pump_flow_rate_ml_per_sec": flow_rate_val,
             "max_dose_time_sec": config.get("max_dose_time_sec", 30.0),
             "cooldown_minutes": config.get("cooldown_minutes", 15),
             "nutrient_gap_seconds": config.get("nutrient_gap_seconds", 10),

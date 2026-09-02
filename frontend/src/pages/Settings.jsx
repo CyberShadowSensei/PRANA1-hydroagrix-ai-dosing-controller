@@ -197,13 +197,14 @@ const Settings = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.1"
-                  min="0.1"
-                  value={dosingConfig.pump_flow_rate_ml_per_sec ?? 0.62}
+                  step="any"
+                  min="0.01"
+                  placeholder="0.62"
+                  value={dosingConfig.pump_flow_rate_ml_per_sec ?? ''}
                   onChange={(e) => setDosingConfig({ ...dosingConfig, pump_flow_rate_ml_per_sec: e.target.value === '' ? '' : Number(e.target.value) })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 px-4 text-white focus:ring-2 focus:ring-cyan-500 outline-none"
                 />
-                <p className="text-xs text-slate-500 mt-1">Calibrated pump speed (Default: 37 mL/min = 0.62 mL/s).</p>
+                <p className="text-xs text-slate-500 mt-1">Calibrated pump speed in mL/s (e.g., 0.62 mL/s = ~37 mL/min).</p>
               </div>
             </div>
 
