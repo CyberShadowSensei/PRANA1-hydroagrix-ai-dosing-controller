@@ -1,3 +1,6 @@
+"""Database LRU Cache Layer
+Provides high-throughput in-memory caching to eliminate redundant SQLite read queries.
+"""
 import threading
 from datetime import datetime
 
