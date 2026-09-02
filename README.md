@@ -1,3 +1,4 @@
+<!-- Hydroagrix Automated Smart Dosing & Nutrient Controller (Production Grade) -->
 # Prana 1: The AI-Enabled Nutrient Dosing Unit
 
 > **An autonomous, self-learning hydroponic engine engineered to eliminate human error in precision agriculture.**
