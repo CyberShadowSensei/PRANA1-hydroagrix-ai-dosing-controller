@@ -1,3 +1,6 @@
+"""Three-Point EC Piecewise Calibration Tool
+Computes low/high slope factors using standard reference solutions with thermal compensation.
+"""
 #!/usr/bin/env python3
 """
 Interactive 3-point EC calibration for Grove Base HAT ADC readings.
