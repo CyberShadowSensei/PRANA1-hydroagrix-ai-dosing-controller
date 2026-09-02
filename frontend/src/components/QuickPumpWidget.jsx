@@ -1,3 +1,7 @@
+/**
+ * QuickPumpWidget Component
+ * Compact dashboard widget for rapid one-touch peristaltic pump triggering.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Droplets, Settings2, PlayCircle, StopCircle } from 'lucide-react';
