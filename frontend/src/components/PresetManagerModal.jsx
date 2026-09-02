@@ -1,3 +1,7 @@
+/**
+ * PresetManagerModal Component
+ * Full-featured modal for creating, modifying, and deleting multi-stage crop preset recipes.
+ */
 import React, { useState, useEffect } from 'react';
 import { HiX, HiCheckCircle } from 'react-icons/hi';
 
