@@ -1,3 +1,6 @@
+"""Hardware Abstraction Layer (HAL)
+Provides unified I2C/GPIO sensor sampling and peristaltic motor driving.
+"""
 import time
 import threading
 import glob
