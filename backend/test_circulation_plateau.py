@@ -1,3 +1,6 @@
+"""Test Suite: Hydrodynamic Circulation Plateau Tracker
+Verifies pattern detection state transitions, 2-cycle validation, and return timeout alerts.
+"""
 import os
 import sys
 import time
