@@ -1,3 +1,6 @@
+"""Test Suite: System Health & Diagnostics API
+Verifies system health payloads, WAL mode verification, and circulation metric endpoints.
+"""
 import os
 import sys
 import json
