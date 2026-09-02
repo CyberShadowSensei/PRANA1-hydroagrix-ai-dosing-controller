@@ -1,3 +1,7 @@
+/**
+ * TankLevels Component
+ * Visual solution tank inventory gauge displaying remaining volume and capacity for all 4 bottles.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import socket from '../socket';
