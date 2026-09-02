@@ -1,3 +1,6 @@
+"""Test Suite: Adaptive Dosing Engine
+Verifies target delta derivations, runtime clamping, cooldown enforcement, and emergency stops.
+"""
 import sys
 from unittest.mock import MagicMock
 
