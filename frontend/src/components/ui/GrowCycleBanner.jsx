@@ -1,3 +1,7 @@
+/**
+ * GrowCycleBanner Component
+ * Top-level status banner displaying active plant name, current cycle day, and phase progression.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { HiPlay, HiStop, HiCalendar, HiTag, HiChip, HiArrowRight, HiClock } from 'react-icons/hi';
