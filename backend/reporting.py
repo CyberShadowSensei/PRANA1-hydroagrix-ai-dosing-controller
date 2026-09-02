@@ -1,3 +1,6 @@
+"""Daily Digest & Analytics Reporting
+Generates automated PDF reports, CSV logs, and camera timelapse compilations.
+"""
 import os
 import csv
 import json
