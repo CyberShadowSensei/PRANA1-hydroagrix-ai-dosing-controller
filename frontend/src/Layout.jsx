@@ -1,3 +1,7 @@
+/**
+ * Page Layout Wrapper
+ * Provides consistent viewport padding, navigation hierarchy, and responsiveness.
+ */
 import React from 'react'
 import PlantCamera from './components/PlantCamera'
 // import LightControl from './components/LightControl'
