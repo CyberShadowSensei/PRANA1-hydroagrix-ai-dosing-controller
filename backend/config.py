@@ -1,3 +1,6 @@
+"""Flask & SQLAlchemy Application Configuration
+Initializes database connections, CORS policies, Socket.IO instance, and application contexts.
+"""
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -44,4 +47,4 @@ def refresh_cache_on_commit(session):
     except Exception:
         pass
     finally:
-        _refreshing = False
+        _refreshing = False
