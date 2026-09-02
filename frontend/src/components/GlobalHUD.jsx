@@ -1,3 +1,7 @@
+/**
+ * GlobalHUD Component
+ * Persistent header heads-up-display rendering live telemetry, network connectivity, and drain badges.
+ */
 import React, { useEffect, useState } from 'react';
 import socket from '../socket';
 
