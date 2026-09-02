@@ -1,3 +1,7 @@
+/**
+ * Settings Component
+ * System configuration hub for universal motor flow rates (mL/min & mL/s), tank capacities, and email alerts.
+ */
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Save, Mail, Lock, User, Sliders } from 'lucide-react';
