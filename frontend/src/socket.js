@@ -1,3 +1,7 @@
+/**
+ * Socket.IO Singleton Client
+ * Configures WebSocket streaming with auto-reconnection and exponential backoff.
+ */
 import { io } from 'socket.io-client';
 import axios from 'axios';
 
