@@ -1,0 +1,11 @@
+{
+  "reservoir_volume_l": 50.0,
+  "pump_flow_rate_ml_per_min": 37.0,
+  "pump_flow_rate_ml_per_sec": 0.61667,
+  "nutrient_ml_per_l_per_ec": 2.0,
+  "ph_up_ml_per_l_per_ph": 0.5,
+  "ph_down_ml_per_l_per_ph": 0.5,
+  "cooldown_minutes": 15.0,
+  "max_dose_time_sec": 240.0,
+  "min_dose_time_sec": 2.0
+}
