@@ -1315,5 +1315,36 @@ Verification:
 - Frontend: 31 passed in 4.53s (100% green across all 31 vitest tests across 9 suites)
 - Total: 240 Automated Tests Passing
 
+## Session Entry: Dynamic Cross-Tank Dependency Lock (Acidification & Nutrient Balance Safeguards)
+
+Date: 2026-09-08
+
+Work Area: Backend Dosing Engine (`backend/dosing.py`), Test Suite (`backend/test_dosing.py`)
+
+Classification: Verified (242 Passing Automated Tests: 211 Pytest + 31 Vitest)
+
+Problem Definition:
+- When a system was left unattended, Tank 3 (pH UP) was depleted to 0 mL by a 240s dosing run, triggering an empty-tank lockout for Pump 3.
+- Meanwhile, the EC sensor remained below target, causing the adaptive engine to dose 240s of Nutrient A and 240s of Nutrient B repeatedly every 30–60 minutes for days.
+- Because concentrated hydroponic fertilizers (Part A Calcium Nitrate and Part B Monopotassium Phosphate $\text{KH}_2\text{PO}_4$) are intrinsically acidic (stock pH 3.5–4.2), dumping liters of nutrient stock into the reservoir without pH UP capability crashed the reservoir pH to 4.87.
+
+Summary of Implemented Solutions:
+1. **Dynamic Acidification Interlock (`backend/dosing.py`)**:
+   - Evaluates live pH against the dynamically active minimum limit (`l_ph.min_value`, sourced from the active crop cycle stage or user configuration).
+   - If `ph_val < l_ph.min_value` and Tank 3 (pH UP) is empty (`not check_tank_has_solution_permission(3)`), Nutrient A & B dosing is strictly blocked.
+   - Logs `CROSS_TANK_LOCKOUT` warning event: `Cross-Tank Lock: Nutrient A/B dosing blocked because pH ({ph_val}) is below set limit ({l_ph.min_value}) and Tank 3 (pH UP) is empty.`
+2. **Nutrient Pair Balance Lock (`backend/dosing.py`)**:
+   - Requires both Tank 1 (Nutrient A) and Tank 2 (Nutrient B) to be available before either pump runs, preventing 1-sided chemical imbalance.
+3. **Automated Test Coverage (`backend/test_dosing.py`)**:
+   - `test_cross_tank_lock_blocks_nutrients_when_ph_low_and_ph_up_empty`: Verifies lockout when pH < dynamic min and Tank 3 is empty.
+   - `test_cross_tank_lock_allows_nutrients_when_ph_within_dynamic_limit`: Verifies normal dosing when pH is in range.
+   - `test_cross_tank_lock_blocks_unbalanced_nutrient_dosing`: Verifies lockout if either Nutrient A or B tank is empty.
+
+Verification:
+- Backend: 211 passed in 30.13s (100% green across all pytest tests)
+- Frontend: 31 passed in 53.25s (100% green across all 31 vitest tests across 9 suites)
+- Total: 242 Automated Tests Passing
+
+
 
 

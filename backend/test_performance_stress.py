@@ -46,7 +46,10 @@ def perf_client():
             db.create_all()
             yield client
             db.session.remove()
-            db.drop_all()
+            try:
+                db.drop_all()
+            except Exception:
+                pass
             db.engine.dispose()
 
 

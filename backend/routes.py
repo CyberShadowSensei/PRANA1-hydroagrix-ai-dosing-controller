@@ -230,6 +230,7 @@ def _prime_pumps_thread():
     finally:
         for pump_id in [1, 2]:
             hal.pump_stop(pump_id)
+            log_pump_action(pump_id, 5.0, "Priming")
         dosing.is_priming_active = False
 
 @app.route("/api/pumps/prime", methods=["POST"])
@@ -498,6 +499,18 @@ def ch_a(): check_and_adjust_sensors(); return jsonify({"message": "OK"}), 200
 
 @app.route("/get_tank_levels", methods=["GET"])
 def get_tank_levels():
+    db_tanks = SolutionTanks.query.order_by(SolutionTanks.tank_id).all()
+    if db_tanks:
+        return jsonify([
+            {
+                "tank_id": t.tank_id,
+                "name": t.name,
+                "capacity_ml": t.capacity_ml,
+                "current_volume_ml": t.current_volume_ml,
+                "last_alert_sent": t.last_alert_sent or 0.0
+            }
+            for t in db_tanks
+        ]), 200
     import db_cache
     tanks = db_cache.get_solution_tanks()
     return jsonify([
@@ -523,6 +536,19 @@ def refill_tank():
         tank.consecutive_blocked_attempts = 0
         tank.next_allowed_alert_time = 0.0
         db.session.commit()
+        try:
+            import db_cache
+            db_cache.update_solution_tank(
+                tank_id=tank.tank_id,
+                name=tank.name,
+                capacity_ml=tank.capacity_ml,
+                current_volume_ml=tank.current_volume_ml,
+                last_alert_sent=tank.last_alert_sent,
+                consecutive_blocked_attempts=tank.consecutive_blocked_attempts,
+                next_allowed_alert_time=tank.next_allowed_alert_time
+            )
+        except Exception:
+            pass
         try:
             socketio.emit('tank_levels_updated', {'tank_id': tank.tank_id, 'current_volume_ml': tank.current_volume_ml})
         except Exception:
@@ -1012,6 +1038,21 @@ def dosing_config():
                 if c_key in data:
                     tank.capacity_ml = float(data[c_key])
             db.session.commit()
+            
+            try:
+                import db_cache
+                for t in SolutionTanks.query.all():
+                    db_cache.update_solution_tank(
+                        tank_id=t.tank_id,
+                        name=t.name,
+                        capacity_ml=t.capacity_ml,
+                        current_volume_ml=t.current_volume_ml,
+                        last_alert_sent=t.last_alert_sent,
+                        consecutive_blocked_attempts=t.consecutive_blocked_attempts,
+                        next_allowed_alert_time=t.next_allowed_alert_time
+                    )
+            except Exception:
+                pass
             
             return jsonify({"message": "Dosing configuration updated"}), 200
             

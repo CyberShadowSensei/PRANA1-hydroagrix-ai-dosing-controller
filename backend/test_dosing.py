@@ -30,9 +30,17 @@ class TestDosing(unittest.TestCase):
     def setUp(self):
         import dosing
         import sensors
+        from config import app, db
+        from models import SolutionTanks
         dosing._reset_dosing_state()
         sensors.live_ph_data.clear()
         sensors.live_tds_data.clear()
+        with app.app_context():
+            db.create_all()
+            SolutionTanks.query.delete()
+            for t_id, name in [(1, "Nutrient A"), (2, "Nutrient B"), (3, "pH UP"), (4, "pH DOWN")]:
+                db.session.add(SolutionTanks(tank_id=t_id, name=name, capacity_ml=5000.0, current_volume_ml=5000.0, last_alert_sent=0.0))
+            db.session.commit()
 
 
     @patch('os.path.exists')
@@ -543,6 +551,116 @@ class TestDosing(unittest.TestCase):
             self.assertIn("EMPTY", args[1])
             self.assertEqual(args[2], "DANGER")
 
+    @patch('os.path.exists')
+    @patch('builtins.open')
+    @patch('hal.pump_start')
+    @patch('dosing.check_tank_has_solution_permission')
+    @patch('dosing.log_event')
+    def test_cross_tank_lock_blocks_nutrients_when_ph_low_and_ph_up_empty(
+        self, mock_log_event, mock_permission, mock_start, mock_file_open, mock_exists
+    ):
+        """Verify dynamic cross-tank lock blocks Nutrient A/B dosing when pH is below dynamic set limit and Tank 3 (pH UP) is empty."""
+        mock_exists.return_value = True
+        config_data = """{
+            "reservoir_volume_l": 50.0,
+            "pump_flow_rate_ml_per_sec": 1.0,
+            "nutrient_ml_per_l_per_ec": 2.0,
+            "max_dose_time_sec": 30.0
+        }"""
+        mock_file_open.return_value.__enter__.return_value.read.return_value = config_data
+        
+        # Tank 3 (pH UP) is empty (returns False)
+        def perm_side_effect(tank_id):
+            if tank_id == 3:
+                return False
+            return True
+        mock_permission.side_effect = perm_side_effect
+        
+        # Dynamic pH range is 5.8 - 6.2, live pH is 4.87 (below min limit), EC is low (0.8 < 1.0)
+        l_ph = DummyLimit(5.8, 6.2, is_active=True)
+        l_tds = DummyLimit(1.0, 2.0, is_active=True)
+        
+        _async_dosing(ph_val=4.87, tds_val=0.8, l_ph=l_ph, l_tds=l_tds)
+        
+        # Pumps 1 and 2 should NOT start
+        mock_start.assert_not_called()
+        
+        # Event log should record CROSS_TANK_LOCKOUT
+        mock_log_event.assert_any_call(
+            "CROSS_TANK_LOCKOUT", "WARNING",
+            "Cross-Tank Lock: Nutrient A/B dosing blocked because pH (4.87) is below set limit (5.80) and Tank 3 (pH UP) is empty. Refill Tank 3 to resume nutrient dosing."
+        )
+
+    @patch('os.path.exists')
+    @patch('builtins.open')
+    @patch('hal.pump_start')
+    @patch('hal.pump_stop')
+    @patch('time.sleep')
+    @patch('dosing.log_pump_action')
+    @patch('dosing.check_tank_has_solution_permission')
+    def test_cross_tank_lock_allows_nutrients_when_ph_within_dynamic_limit(
+        self, mock_permission, mock_log_pump, mock_sleep, mock_stop, mock_start, mock_file_open, mock_exists
+    ):
+        """Verify nutrients CAN dose when pH is within/above dynamic range, even if Tank 3 is empty."""
+        mock_exists.return_value = True
+        config_data = """{
+            "reservoir_volume_l": 50.0,
+            "pump_flow_rate_ml_per_sec": 1.0,
+            "nutrient_ml_per_l_per_ec": 2.0,
+            "max_dose_time_sec": 30.0
+        }"""
+        mock_file_open.return_value.__enter__.return_value.read.return_value = config_data
+        
+        # Tank 3 is empty, but Tanks 1 and 2 are OK
+        def perm_side_effect(tank_id):
+            return tank_id != 3
+        mock_permission.side_effect = perm_side_effect
+        
+        # pH is 6.0 (safely inside 5.8 - 6.2)
+        l_ph = DummyLimit(5.8, 6.2, is_active=True)
+        l_tds = DummyLimit(1.0, 2.0, is_active=True)
+        
+        _async_dosing(ph_val=6.0, tds_val=0.8, l_ph=l_ph, l_tds=l_tds)
+        
+        # Pump 1 and 2 should have run
+        mock_start.assert_any_call(1)
+        mock_start.assert_any_call(2)
+
+    @patch('os.path.exists')
+    @patch('builtins.open')
+    @patch('hal.pump_start')
+    @patch('dosing.check_tank_has_solution_permission')
+    @patch('dosing.log_event')
+    def test_cross_tank_lock_blocks_unbalanced_nutrient_dosing(
+        self, mock_log_event, mock_permission, mock_start, mock_file_open, mock_exists
+    ):
+        """Verify nutrient dosing is aborted if either Tank 1 or Tank 2 is empty, preserving chemical balance."""
+        mock_exists.return_value = True
+        config_data = """{
+            "reservoir_volume_l": 50.0,
+            "pump_flow_rate_ml_per_sec": 1.0,
+            "nutrient_ml_per_l_per_ec": 2.0,
+            "max_dose_time_sec": 30.0
+        }"""
+        mock_file_open.return_value.__enter__.return_value.read.return_value = config_data
+        
+        # Tank 1 (Nutrient A) is empty, Tank 2 is OK, Tank 3 is OK
+        def perm_side_effect(tank_id):
+            return tank_id != 1
+        mock_permission.side_effect = perm_side_effect
+        
+        l_ph = DummyLimit(5.8, 6.2, is_active=True)
+        l_tds = DummyLimit(1.0, 2.0, is_active=True)
+        
+        _async_dosing(ph_val=6.0, tds_val=0.8, l_ph=l_ph, l_tds=l_tds)
+        
+        mock_start.assert_not_called()
+        mock_log_event.assert_any_call(
+            "CROSS_TANK_LOCKOUT", "WARNING",
+            "Cross-Tank Lock: Both Nutrient A (Tank 1: EMPTY) and Nutrient B (Tank 2: OK) are required for balanced dosing. Dosing aborted."
+        )
+
 if __name__ == '__main__':
     unittest.main()
+
 

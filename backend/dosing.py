@@ -82,12 +82,32 @@ def log_pump_action(pump_id, duration, trigger_type):
             db.session.commit()
             
             try:
+                import db_cache
+                if tank:
+                    db_cache.update_solution_tank(
+                        tank_id=tank.tank_id,
+                        name=tank.name,
+                        capacity_ml=tank.capacity_ml,
+                        current_volume_ml=tank.current_volume_ml,
+                        last_alert_sent=tank.last_alert_sent,
+                        consecutive_blocked_attempts=tank.consecutive_blocked_attempts,
+                        next_allowed_alert_time=tank.next_allowed_alert_time
+                    )
+            except Exception as dbe:
+                print(f"Error updating tank in db_cache: {dbe}")
+
+            try:
                 from config import socketio
                 socketio.emit('pump_activity', {
                     'pump_id': pump_id, 
                     'duration': duration, 
                     'trigger_type': trigger_type
                 })
+                if tank:
+                    socketio.emit('tank_levels_updated', {
+                        'tank_id': tank.tank_id,
+                        'current_volume_ml': tank.current_volume_ml
+                    })
             except Exception as se:
                 print(f"Error emitting pump_activity socket: {se}")
     except Exception as e:
@@ -138,6 +158,7 @@ def _safe_pump_run(pump_id, duration_sec, stop_condition_fn=None):
             hal.pump_stop(pump_id)
         except Exception as e:
             print(f"Safety halt failed for pump {pump_id}: {e}")
+    return round(elapsed, 2)
 
 def check_tank_has_solution_permission(pump_id):
     """
@@ -232,36 +253,59 @@ def _async_dosing(ph_val, tds_val, l_ph, l_tds):
         with hal.pump_lock:
             # ================= EC Dosing =================
             if l_tds and l_tds.is_active and tds_val < l_tds.min_value:
-                target_tds = (l_tds.min_value + l_tds.max_value) / 2.0
-                delta_ec = target_tds - tds_val
-                required_ml = delta_ec * reservoir_vol * nutrient_factor
-                dose_time_1 = max(0.0, min(required_ml / flow_rate_1, max_dose_ec_1))
-                if 0 < dose_time_1 < MIN_PUMP_RUN_SEC:
-                    dose_time_1 = MIN_PUMP_RUN_SEC
-                dose_time_2 = max(0.0, min(required_ml / flow_rate_2, max_dose_ec_2))
-                if 0 < dose_time_2 < MIN_PUMP_RUN_SEC:
-                    dose_time_2 = MIN_PUMP_RUN_SEC
+                # Dynamic Cross-Tank Dependency Lock:
+                # 1. Acidification Lock: If pH is below dynamic set limit (l_ph.min_value) and Tank 3 (pH UP) is empty/unavailable,
+                #    block Nutrient A & B dosing to prevent driving pH even deeper into danger.
+                ph_below_dynamic_min = bool(l_ph and l_ph.is_active and ph_val is not None and ph_val < l_ph.min_value)
+                ph_up_available = check_tank_has_solution_permission(3)
 
-                def _ec_stop_check():
-                    if live_tds_data and live_tds_data[-1].get("status") == "OK":
-                        current = live_tds_data[-1].get("value")
-                        if current is not None and current >= target_tds:
-                            return True, f"EC reached target {target_tds:.2f} (current: {current:.2f})"
-                    return False, None
+                if ph_below_dynamic_min and not ph_up_available:
+                    log_event(
+                        "CROSS_TANK_LOCKOUT", "WARNING",
+                        f"Cross-Tank Lock: Nutrient A/B dosing blocked because pH ({ph_val:.2f}) is below set limit ({l_ph.min_value:.2f}) and Tank 3 (pH UP) is empty. Refill Tank 3 to resume nutrient dosing."
+                    )
+                    print(f"CROSS_TANK_LOCKOUT: Nutrient dosing blocked (pH {ph_val:.2f} < {l_ph.min_value:.2f}, Tank 3 empty)")
+                else:
+                    target_tds = (l_tds.min_value + l_tds.max_value) / 2.0
+                    delta_ec = target_tds - tds_val
+                    required_ml = delta_ec * reservoir_vol * nutrient_factor
+                    dose_time_1 = max(0.0, min(required_ml / flow_rate_1, max_dose_ec_1))
+                    if 0 < dose_time_1 < MIN_PUMP_RUN_SEC:
+                        dose_time_1 = MIN_PUMP_RUN_SEC
+                    dose_time_2 = max(0.0, min(required_ml / flow_rate_2, max_dose_ec_2))
+                    if 0 < dose_time_2 < MIN_PUMP_RUN_SEC:
+                        dose_time_2 = MIN_PUMP_RUN_SEC
 
-                if dose_time_1 > 0 or dose_time_2 > 0:
-                    # Pump 1 (Nutrient A)
-                    if dose_time_1 > 0 and _tank_has_solution(1):
-                        log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient A for {dose_time_1:.2f}s (Delta: {delta_ec:.2f} EC)")
-                        log_pump_action(1, dose_time_1, "Automatic")
-                        _safe_pump_run(1, dose_time_1, stop_condition_fn=_ec_stop_check)
-                        _last_ec_prediction = {'pre_val': tds_val, 'predicted_delta': delta_ec, 'time': time.time()}
-                        time.sleep(nut_gap_s)
-                    # Pump 2 (Nutrient B) — checked independently
-                    if dose_time_2 > 0 and _tank_has_solution(2):
-                        log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient B for {dose_time_2:.2f}s")
-                        log_pump_action(2, dose_time_2, "Automatic")
-                        _safe_pump_run(2, dose_time_2, stop_condition_fn=_ec_stop_check)
+                    # 2. Nutrient Pair Balance Lock:
+                    # Both Tank 1 and Tank 2 must have solution for balanced dosing.
+                    tank_1_ok = _tank_has_solution(1)
+                    tank_2_ok = _tank_has_solution(2)
+
+                    if (dose_time_1 > 0 or dose_time_2 > 0) and not (tank_1_ok and tank_2_ok):
+                        log_event(
+                            "CROSS_TANK_LOCKOUT", "WARNING",
+                            f"Cross-Tank Lock: Both Nutrient A (Tank 1: {'OK' if tank_1_ok else 'EMPTY'}) and Nutrient B (Tank 2: {'OK' if tank_2_ok else 'EMPTY'}) are required for balanced dosing. Dosing aborted."
+                        )
+                    elif dose_time_1 > 0 or dose_time_2 > 0:
+                        def _ec_stop_check():
+                            if live_tds_data and live_tds_data[-1].get("status") == "OK":
+                                current = live_tds_data[-1].get("value")
+                                if current is not None and current >= target_tds:
+                                    return True, f"EC reached target {target_tds:.2f} (current: {current:.2f})"
+                            return False, None
+
+                        # Pump 1 (Nutrient A)
+                        if dose_time_1 > 0:
+                            log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient A for {dose_time_1:.2f}s (Delta: {delta_ec:.2f} EC)")
+                            actual_time_1 = _safe_pump_run(1, dose_time_1, stop_condition_fn=_ec_stop_check)
+                            log_pump_action(1, actual_time_1, "Automatic")
+                            _last_ec_prediction = {'pre_val': tds_val, 'predicted_delta': delta_ec, 'time': time.time()}
+                            time.sleep(nut_gap_s)
+                        # Pump 2 (Nutrient B)
+                        if dose_time_2 > 0:
+                            log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient B for {dose_time_2:.2f}s")
+                            actual_time_2 = _safe_pump_run(2, dose_time_2, stop_condition_fn=_ec_stop_check)
+                            log_pump_action(2, actual_time_2, "Automatic")
             elif l_tds and l_tds.is_active and tds_val > l_tds.max_value:
                 log_event("EC_DANGER_ALARM", "ALARM", f"EC value {tds_val} exceeds limit {l_tds.max_value}. Dosing halted.", {"current_ec": tds_val})
 
@@ -284,8 +328,8 @@ def _async_dosing(ph_val, tds_val, l_ph, l_tds):
 
                     if dose_time_3 > 0 and _tank_has_solution(3):
                         log_event("PUMP_ACTIVATION", "INFO", f"Dosed pH UP for {dose_time_3:.2f}s (Delta: {delta_ph:.2f} pH)")
-                        log_pump_action(3, dose_time_3, "Automatic")
-                        _safe_pump_run(3, dose_time_3, stop_condition_fn=_ph_up_stop_check)
+                        actual_time_3 = _safe_pump_run(3, dose_time_3, stop_condition_fn=_ph_up_stop_check)
+                        log_pump_action(3, actual_time_3, "Automatic")
                         _last_ph_up_prediction = {'pre_val': ph_val, 'predicted_delta': delta_ph, 'time': time.time()}
 
                 elif ph_val > l_ph.max_value:
@@ -304,8 +348,8 @@ def _async_dosing(ph_val, tds_val, l_ph, l_tds):
 
                     if dose_time_4 > 0 and _tank_has_solution(4):
                         log_event("PUMP_ACTIVATION", "INFO", f"Dosed pH DOWN for {dose_time_4:.2f}s (Delta: {delta_ph:.2f} pH)")
-                        log_pump_action(4, dose_time_4, "Automatic")
-                        _safe_pump_run(4, dose_time_4, stop_condition_fn=_ph_down_stop_check)
+                        actual_time_4 = _safe_pump_run(4, dose_time_4, stop_condition_fn=_ph_down_stop_check)
+                        log_pump_action(4, actual_time_4, "Automatic")
                         _last_ph_down_prediction = {'pre_val': ph_val, 'predicted_delta': delta_ph, 'time': time.time()}
     finally:
         for p in [1, 2, 3, 4]:

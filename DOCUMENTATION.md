@@ -124,6 +124,7 @@ The backend is built using Flask, Flask-SocketIO, and SQLAlchemy running on Pyth
 ### 3.2 Key Backend Modules
 - **`routes.py`**: Declares all REST API endpoints (`/sensor/limits`, `/pump/<id>/start`, `/set_active_plant`, etc.).
 - **`sensors.py`**: Manages piecewise linear calibration for pH (`ph_calibration.json`) and EC (`ec_calibration.json`) with Nernst temperature compensation.
+- **`dosing.py`**: Closed-loop adaptive dosing engine with **Dynamic Cross-Tank Dependency Lock** (prevents acidic nutrient dosing when pH is below dynamic target and pH UP is empty, and enforces 1:1 pair balance between Part A and Part B).
 - **`grow_cycle_helper.py`**: Single source of truth for calculating crop cycle progression day, active phase, next phase transition, and active target limits.
 
 ---
@@ -230,6 +231,13 @@ The system includes a target database diagnostic script located at `~/hydro-db-c
   4. **Active Sensor Limits**: Range bounds and active state (`is_active`) per sensor type.
   5. **Recent Danger & Warning Logs**: Displays the 5 most recent `WARNING` and `DANGER` entries from `event_log`.
   6. **Recent Pump Execution Logs**: Displays the 5 most recent dosing pump operations from `pump_log`.
+
+### 5.3 Solution Tanks Inventory Tracking & Volume Calculation
+The system calculates fluid inventory for all 4 dosing bottles (`SolutionTanks`) using an open-loop volumetric integration model:
+- **Volume Depleted Calculation**: $\text{Volume Used (mL)} = \text{Actual Runtime (s)} \times \text{Calibrated Flow Rate (mL/s)}$
+- **Runtime Execution**: Actual elapsed pump run time is measured and returned by `_safe_pump_run()`, ensuring precise volume deductions even when mid-dose target attainment cuts dosing short early.
+- **Priming Tracking**: Manual priming cycles via `/api/pumps/prime` log action and deduct consumed fluid from inventory.
+- **Cache Synchronization**: Live inventory updates sync directly between the SQLite `SolutionTanks` table, in-memory `db_cache`, and Socket.IO `tank_levels_updated` / `pump_activity` events for real-time frontend gauge updates.
 
 ---
 
