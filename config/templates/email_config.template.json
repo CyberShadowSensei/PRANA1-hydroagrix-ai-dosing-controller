@@ -1,0 +1,9 @@
+{
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "sender_email": "alerts@hydroagrix.ai",
+  "sender_password": "YOUR_APP_PASSWORD_HERE",
+  "recipients": [
+    "grower@hydroagrix.ai"
+  ]
+}
