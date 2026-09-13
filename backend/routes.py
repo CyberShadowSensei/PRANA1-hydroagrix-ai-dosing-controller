@@ -873,17 +873,17 @@ def check_status_mail_route():
 
 @app.route("/get_ph_history")
 def g_ph_h():
-    d = PHData.query.order_by(PHData.id.desc()).limit(50).all()
+    d = PHData.query.order_by(PHData.id.desc()).limit(2000).all()
     return jsonify({"ph_data": [x.to_json() for x in reversed(d)]})
 
 @app.route("/get_tds_history")
 def g_tds_h():
-    d = TDSData.query.order_by(TDSData.id.desc()).limit(50).all()
+    d = TDSData.query.order_by(TDSData.id.desc()).limit(2000).all()
     return jsonify({"tds_data": [x.to_json() for x in reversed(d)]})
 
 @app.route("/get_temperature_humidity_history")
 def g_th_h():
-    d = TemperatureHumidityData.query.order_by(TemperatureHumidityData.id.desc()).limit(50).all()
+    d = TemperatureHumidityData.query.order_by(TemperatureHumidityData.id.desc()).limit(2000).all()
     return jsonify({"temperature_humidity_data": [x.to_json() for x in reversed(d)]})
 
 @app.route("/delete_temperature_humidity_data", methods=["POST"])

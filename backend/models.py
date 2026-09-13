@@ -294,3 +294,29 @@ class EmailAuditLog(db.Model):
             "error_message": self.error_message,
             "created_at": localized_date.strftime('%Y-%m-%d %H:%M:%S %Z')
         }
+
+class SystemAlerts(db.Model):
+    __tablename__ = 'system_alerts'
+    id = db.Column(db.Integer, primary_key=True)
+    alert_key = db.Column(db.String(100), unique=True, nullable=False)
+    status = db.Column(db.String(20), default="ACTIVE")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+class ActionTokens(db.Model):
+    __tablename__ = 'action_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(100), unique=True, nullable=False)
+    action_type = db.Column(db.String(50), nullable=False)
+    is_used = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class NutrientObservations(db.Model):
+    __tablename__ = 'nutrient_observations'
+    id = db.Column(db.Integer, primary_key=True)
+    dose_type = db.Column(db.String(50), nullable=False)
+    volume_ml = db.Column(db.Float, nullable=False)
+    pre_ph = db.Column(db.Float, nullable=False)
+    post_ph = db.Column(db.Float, nullable=False)
+    delta_ph = db.Column(db.Float, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)

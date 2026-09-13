@@ -227,7 +227,7 @@ const History = () => {
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-700/30 flex flex-col md:flex-row items-center justify-between gap-4">
           <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500 drop-shadow-[0_0_15px_rgba(16,185,129,0.3)] mb-3 md:mb-0">
-            Sensor History (Latest 10 entries)
+            Sensor History (Historical Data)
           </h2>
           <div className="flex gap-4">
             <button 

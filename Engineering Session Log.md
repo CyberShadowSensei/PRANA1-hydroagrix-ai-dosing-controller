@@ -1345,6 +1345,29 @@ Verification:
 - Frontend: 31 passed in 53.25s (100% green across all 31 vitest tests across 9 suites)
 - Total: 242 Automated Tests Passing
 
+## Session Entry: Non-Blocking Pump Stop Logic, History UI Expansion, & Observation Engine Module 1
 
+Date: 2026-09-14
 
+Work Area: Backend Dosing Engine (`backend/dosing.py`), Frontend History UI (`frontend/src/pages/History.jsx`, `backend/routes.py`), Observation Engine (`backend/observation_engine.py`)
 
+Classification: Verified
+
+Problem Definition:
+- **Crash Loop:** The `_safe_pump_run` callback loop in `dosing.py` was being blocked by a `time.sleep(0.5)` command inside the `stop_check` function, causing the 0.1-second tick loop to stall, massive over-dosing, and eventual timeouts/crashes.
+- **Micro-History:** The frontend historical charts only rendered 50 data points (about 8 hours of history), making it impossible to observe transpiration drift, plant feeding cycles, or long-term growth patterns.
+- **Nutrient Acidity Ignorance:** The system required manual input or hard-coded assumptions regarding whether nutrient mixes were acidic or alkaline.
+
+Summary of Implemented Solutions:
+1. **Non-Blocking Callback Array (`backend/dosing.py`)**:
+   - Replaced `time.sleep` with an array-based tick-counting state machine (`confirmations = [0]`). The pump loop evaluates the condition every 0.1s without blocking the main event thread, guaranteeing precise milliliter delivery.
+2. **Timeline Horizon Expansion (`backend/routes.py`, `frontend/src/pages/History.jsx`)**:
+   - Increased query limit on all history endpoints (`/get_ph_history`, `/get_tds_history`, `/get_temperature_humidity_history`) from 50 to 2,000 data points, increasing the visible timeline window from ~8 hours to ~14 days.
+3. **Observation Engine Module 1 - Nutrient pH Impact Inference (`backend/observation_engine.py`, `backend/models.py`)**:
+   - Deployed new database tables (`SystemAlerts`, `ActionTokens`, `NutrientObservations`).
+   - Implemented `NutrientImpactTracker` which calculates the post-dose $\Delta$pH caused specifically by Nutrient A & B stock.
+   - Wired the tracker into `dosing.py`, allowing the dynamic cross-tank lock to automatically tighten the lower-bound safety floor (`l_ph.min_value + 0.1`) if it determines the current nutrient brand is highly acidic ($\Delta\text{pH} < -0.01$).
+
+Verification:
+- The backend API and dashboard history limits updated successfully.
+- Deployment of non-blocking `dosing.py` to the hardware verified zero crashes and correct `CROSS_TANK_LOCKOUT` behavior when attempting to dose into an empty tank.
