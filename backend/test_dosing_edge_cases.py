@@ -211,3 +211,18 @@ class TestHardwareFaultDetection(unittest.TestCase):
         resolved_calls = [c for c in mock_log_event.mock_calls
                           if c.args[0] == "HARDWARE_FAULT_RESOLVED"]
         self.assertEqual(len(resolved_calls), 1)
+
+    @patch('dosing.log_event')
+    def test_manual_reset_clears_suspension(self, mock_log_event):
+        """reset_hw_fault clears active suspension immediately without waiting for timer."""
+        import dosing as d
+        import time as t
+        d._hw_fault_state[3]["failures"] = 2
+        d._hw_fault_state[3]["suspended_until"] = t.time() + 3600
+        self.assertTrue(d._hw_suspended(3))
+
+        d.reset_hw_fault(3)
+
+        self.assertFalse(d._hw_suspended(3))
+        self.assertEqual(d._hw_fault_state[3]["failures"], 0)
+

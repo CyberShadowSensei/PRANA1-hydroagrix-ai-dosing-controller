@@ -108,6 +108,28 @@ def _record_hw_success(pump_key: str | int):
         state["suspended_until"] = 0.0
 
 
+def reset_hw_fault(pump_key: str | int | None = None):
+    """Manually reset hardware fault suspension for a specific pump or all pumps.
+    Can be called manually, from UI pump priming, or via REST API."""
+    if pump_key is None:
+        for k, state in _hw_fault_state.items():
+            state["failures"] = 0
+            state["suspended_until"] = 0.0
+        log_event("HARDWARE_FAULT_RESET", "INFO", "All hardware fault suspensions reset manually.")
+    else:
+        key = "ec" if pump_key in (1, 2, "1", "2", "ec") else pump_key
+        try:
+            key = int(key)
+        except (ValueError, TypeError):
+            pass
+        state = _hw_fault_state.get(key)
+        if state is not None:
+            state["failures"] = 0
+            state["suspended_until"] = 0.0
+            label = PUMP_LABEL.get(key, str(key))
+            log_event("HARDWARE_FAULT_RESET", "INFO", f"{label}: hardware fault suspension reset manually.")
+
+
 def _hw_suspended(pump_key: str | int) -> bool:
     """Return True (and log a short warning) if the pump is currently suspended."""
     state = _hw_fault_state.get(pump_key)

@@ -178,6 +178,7 @@ def start_p(pump_id):
     d = data.get("duration", 5)
     print(f"DEBUG ROUTES: /pump/{pump_id}/start hit with duration={d}")
     if pump_id in hal.PUMP_PINS:
+        dosing.reset_hw_fault(pump_id)
         with hal.pump_lock:
             hal.pump_start(pump_id)
             print(f"DEBUG ROUTES: After pump_start, hal.pump_status = {hal.pump_status}")
@@ -210,6 +211,7 @@ def stop_p(pump_id):
 def start_all_pumps_route():
     try:
         data = request.get_json() or {}; duration = data.get("duration", 5)
+        dosing.reset_hw_fault()
         with hal.pump_lock:
             for pump_id in hal.PUMP_PINS:
                 hal.pump_start(pump_id)
@@ -239,9 +241,18 @@ def prime_pumps():
     if dosing.is_priming_active:
         return jsonify({"error": "Priming is already active"}), 400
     
+    dosing.reset_hw_fault()
     dosing.is_priming_active = True
     threading.Thread(target=_prime_pumps_thread, daemon=True).start()
     return jsonify({"message": "Priming started"}), 200
+
+@app.route("/api/dosing/reset_faults", methods=["POST"])
+def reset_hardware_faults():
+    """Reset hardware fault suspensions for all pumps or a specific pump."""
+    data = request.get_json(silent=True) or {}
+    pump_key = data.get("pump_key") or data.get("pump_id")
+    dosing.reset_hw_fault(pump_key)
+    return jsonify({"message": f"Hardware fault suspension reset for {pump_key or 'all pumps'}"}), 200
 
 @app.route("/pump/all/stop", methods=["POST"])
 def stop_all_pumps_route():
