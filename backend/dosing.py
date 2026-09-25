@@ -130,6 +130,25 @@ def reset_hw_fault(pump_key: str | int | None = None):
             log_event("HARDWARE_FAULT_RESET", "INFO", f"{label}: hardware fault suspension reset manually.")
 
 
+def get_hw_fault_status() -> dict:
+    """Return human-readable hardware fault status for all pumps for UI display."""
+    now = time.time()
+    res = {}
+    for key, state in _hw_fault_state.items():
+        is_suspended = now < state["suspended_until"]
+        remaining_sec = max(0, int(state["suspended_until"] - now)) if is_suspended else 0
+        res[str(key)] = {
+            "key": key,
+            "label": PUMP_LABEL.get(key, str(key)),
+            "failures": state["failures"],
+            "is_suspended": is_suspended,
+            "suspended_until": state["suspended_until"],
+            "remaining_sec": remaining_sec,
+            "resume_time_str": time.strftime("%H:%M IST", time.localtime(state["suspended_until"])) if is_suspended else None
+        }
+    return res
+
+
 def _hw_suspended(pump_key: str | int) -> bool:
     """Return True (and log a short warning) if the pump is currently suspended."""
     state = _hw_fault_state.get(pump_key)

@@ -169,6 +169,7 @@ def auto_stop_pump_monitored(pump_id, duration):
 @app.route("/pump/status")
 def p_status():
     status_dict = {f"pump{k}": v for k, v in hal.pump_status.items()}
+    status_dict["fault_status"] = dosing.get_hw_fault_status()
     print(f"DEBUG ROUTES: /pump/status response = {status_dict}")
     return jsonify(status_dict)
 
