@@ -12,9 +12,16 @@ _initialized = False
 
 def init_cache(app, db):
     global _initialized
+    # Guard: never re-initialise. Once populated, all updates go through the
+    # individual update_* functions. Re-running init clears live state and
+    # resets tank/limit data to the DB snapshot, discarding in-memory deltas.
+    if _initialized:
+        return
     from models import SensorLimits, PlantStageStatus, SolutionTanks
     with app.app_context():
         with _lock:
+            if _initialized:  # Double-checked locking
+                return
             try:
                 _sensor_limits.clear()
                 for limit in SensorLimits.query.all():
@@ -49,7 +56,7 @@ def init_cache(app, db):
                 _initialized = True
                 print("DEBUG: db_cache initialized successfully.")
             except Exception as e:
-                print(f"DEBUG: db_cache init skipped or failed: {e}")
+                print(f"DEBUG: db_cache init failed: {e}")
 
 def get_sensor_limits():
     if not _initialized:

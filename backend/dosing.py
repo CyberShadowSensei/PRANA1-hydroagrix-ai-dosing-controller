@@ -505,34 +505,59 @@ def _evaluate_last_dose(current_tds, current_ph, config):
             save_system_config(config)
             log_event("DOSING_CALIBRATION", "INFO",
                       f"EC factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
+        elif actual_delta <= 0:
+            # No EC movement after dose: do NOT adjust the factor upward.
+            # This prevents runaway when the tank is empty or a blockage exists.
+            log_event("CALIBRATION_SKIP_NO_MOVEMENT", "WARNING",
+                      f"EC calibration skipped — no EC rise observed after dose (pre: {_last_ec_prediction['pre_val']:.2f}, current: {current_tds:.2f}). Check Tank 1/2 levels and tubing.")
         _last_ec_prediction = None
 
     if _last_ph_up_prediction:
         actual_delta = current_ph - _last_ph_up_prediction['pre_val']
         predicted_delta = _last_ph_up_prediction['predicted_delta']
         if predicted_delta > 0:
-            ratio = actual_delta / predicted_delta if actual_delta > 0 else 0.1
+            ratio = actual_delta / predicted_delta if actual_delta > 0 else None
             current_factor = float(config.get("ph_up_ml_per_l_per_ph", 0.5))
-            correction = current_factor / ratio
-            new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
-            new_factor = max(0.1, min(new_factor, 50.0))
-            config["ph_up_ml_per_l_per_ph"] = new_factor
-            save_system_config(config)
-            log_event("DOSING_CALIBRATION", "INFO",
-                      f"pH UP factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
+            if ratio is None or ratio <= 0:
+                # pH did not rise after dose. Likely causes: Tank 3 (pH UP) is empty,
+                # airlock in tubing, or peristaltic pump head failure.
+                # DO NOT increase the factor — that just makes the next dose longer
+                # with the same no-effect result, wasting solution and masking the fault.
+                log_event("CALIBRATION_SKIP_NO_MOVEMENT", "WARNING",
+                          f"pH UP calibration skipped — no pH rise observed after {_last_ph_up_prediction['predicted_delta']:.2f} pH dose "
+                          f"(pre: {_last_ph_up_prediction['pre_val']:.2f}, current: {current_ph:.2f}). "
+                          f"Check Tank 3 (pH UP) level and tubing. Current factor: {current_factor:.4f}")
+            else:
+                correction = current_factor / ratio
+                new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
+                # Cap single-step change to 2x to prevent overreaction
+                new_factor = max(0.1, min(new_factor, current_factor * 2.0, 10.0))
+                config["ph_up_ml_per_l_per_ph"] = new_factor
+                save_system_config(config)
+                log_event("DOSING_CALIBRATION", "INFO",
+                          f"pH UP factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
         _last_ph_up_prediction = None
+
 
     if _last_ph_down_prediction:
         actual_delta = _last_ph_down_prediction['pre_val'] - current_ph
         predicted_delta = _last_ph_down_prediction['predicted_delta']
         if predicted_delta > 0:
-            ratio = actual_delta / predicted_delta if actual_delta > 0 else 0.1
+            ratio = actual_delta / predicted_delta if actual_delta > 0 else None
             current_factor = float(config.get("ph_down_ml_per_l_per_ph", 0.5))
-            correction = current_factor / ratio
-            new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
-            new_factor = max(0.1, min(new_factor, 50.0))
-            config["ph_down_ml_per_l_per_ph"] = new_factor
-            save_system_config(config)
+            if ratio is None or ratio <= 0:
+                log_event("CALIBRATION_SKIP_NO_MOVEMENT", "WARNING",
+                          f"pH DOWN calibration skipped — no pH drop observed after dose "
+                          f"(pre: {_last_ph_down_prediction['pre_val']:.2f}, current: {current_ph:.2f}). "
+                          f"Check Tank 4 (pH DOWN) level and tubing. Current factor: {current_factor:.4f}")
+            else:
+                correction = current_factor / ratio
+                new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
+                new_factor = max(0.1, min(new_factor, current_factor * 2.0, 10.0))
+                config["ph_down_ml_per_l_per_ph"] = new_factor
+                save_system_config(config)
+                log_event("DOSING_CALIBRATION", "INFO",
+                          f"pH DOWN factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
         _last_ph_down_prediction = None
 
 
