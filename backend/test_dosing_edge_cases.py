@@ -117,3 +117,97 @@ class TestDosingEdgeCases(unittest.TestCase):
             "PUMP_ACTIVATION", "INFO", "Dosed Nutrient A for 100.00s (Delta: 1.00 EC)"
         )
 
+
+class TestHardwareFaultDetection(unittest.TestCase):
+    """Tests for the hardware fault detection and pump suspension system."""
+
+    def setUp(self):
+        # Reset hw fault state before each test
+        import dosing as d
+        for key in d._hw_fault_state:
+            d._hw_fault_state[key]["failures"] = 0
+            d._hw_fault_state[key]["suspended_until"] = 0.0
+            d._hw_fault_state[key]["last_alert"] = 0.0
+
+    def test_single_failure_increments_counter(self):
+        """A single zero-movement dose increments the fault counter but does not suspend."""
+        import dosing as d
+        d._record_hw_fault(3)
+        self.assertEqual(d._hw_fault_state[3]["failures"], 1)
+        # Below threshold (2) — should NOT be suspended yet
+        self.assertFalse(d._hw_suspended(3))
+
+    def test_threshold_triggers_suspension(self):
+        """Reaching HW_FAULT_THRESHOLD consecutive failures suspends the pump."""
+        import dosing as d
+        with patch('dosing.sensor_monitor') as mock_monitor, \
+             patch('dosing.log_event') as mock_log, \
+             patch('threading.Thread') as mock_thread:
+            mock_thread.return_value.start = lambda: None
+            for _ in range(d.HW_FAULT_THRESHOLD):
+                d._record_hw_fault(3)
+
+        # Pump 3 should now be suspended
+        self.assertTrue(d._hw_suspended(3))
+        self.assertGreater(d._hw_fault_state[3]["suspended_until"], 0.0)
+
+    def test_fault_cleared_on_success(self):
+        """A successful dose (sensor moved) clears the fault counter and suspension."""
+        import dosing as d
+        # Simulate prior failures
+        d._hw_fault_state[3]["failures"] = 2
+        d._hw_fault_state[3]["suspended_until"] = 0.0  # not suspended yet
+
+        with patch('dosing.log_event'):
+            d._record_hw_success(3)
+
+        self.assertEqual(d._hw_fault_state[3]["failures"], 0)
+        self.assertFalse(d._hw_suspended(3))
+
+    def test_ec_fault_tracks_separately(self):
+        """EC fault state is independent from pH UP/DOWN fault state."""
+        import dosing as d
+        with patch('dosing.sensor_monitor'), \
+             patch('dosing.log_event'), \
+             patch('threading.Thread') as mock_thread:
+            mock_thread.return_value.start = lambda: None
+            for _ in range(d.HW_FAULT_THRESHOLD):
+                d._record_hw_fault("ec")
+
+        # EC should be suspended
+        self.assertTrue(d._hw_suspended("ec"))
+        # But pH UP (pump 3) should NOT be suspended
+        self.assertFalse(d._hw_suspended(3))
+
+    def test_suspension_expires_automatically(self):
+        """After the suspension window passes, _hw_suspended returns False again."""
+        import dosing as d
+        import time as t
+        # Manually set suspension to 1 second ago (expired)
+        d._hw_fault_state[3]["suspended_until"] = t.time() - 1.0
+        self.assertFalse(d._hw_suspended(3))
+
+    @patch('dosing.log_event')
+    def test_hardware_fault_suspected_event_logged(self, mock_log_event):
+        """Reaching fault threshold logs a HARDWARE_FAULT_SUSPECTED DANGER event."""
+        import dosing as d
+        with patch('threading.Thread') as mock_thread:
+            mock_thread.return_value.start = lambda: None
+            for _ in range(d.HW_FAULT_THRESHOLD):
+                d._record_hw_fault(3)
+
+        danger_calls = [c for c in mock_log_event.mock_calls
+                        if c.args[0] == "HARDWARE_FAULT_SUSPECTED"]
+        self.assertGreaterEqual(len(danger_calls), 1)
+
+    @patch('dosing.log_event')
+    def test_fault_resolved_event_logged_on_success(self, mock_log_event):
+        """Clearing a fault with _record_hw_success logs HARDWARE_FAULT_RESOLVED."""
+        import dosing as d
+        d._hw_fault_state[3]["failures"] = 1  # Simulated prior failure
+
+        d._record_hw_success(3)
+
+        resolved_calls = [c for c in mock_log_event.mock_calls
+                          if c.args[0] == "HARDWARE_FAULT_RESOLVED"]
+        self.assertEqual(len(resolved_calls), 1)

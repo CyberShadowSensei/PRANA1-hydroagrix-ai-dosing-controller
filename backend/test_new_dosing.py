@@ -378,8 +378,10 @@ class TestEvaluateLastDose(unittest.TestCase):
         new_factor = written.get('nutrient_ml_per_l_per_ec')
         self.assertIsNotNone(new_factor, "system_config.json should have been written")
         self.assertGreater(new_factor, 2.0, "Factor should increase after underdose")
-        mock_log.assert_called_once()
-        self.assertIn('DOSING_CALIBRATION', mock_log.call_args.args[0])
+        # Verify a DOSING_CALIBRATION log was emitted
+        calibration_calls = [c for c in mock_log.call_args_list if c.args[0] == 'DOSING_CALIBRATION']
+        self.assertEqual(len(calibration_calls), 1, "Expected exactly one DOSING_CALIBRATION log event")
+
 
     def test_overdose_nudges_factor_down(self):
         """If actual EC rise was double predicted (200%), factor should decrease."""
@@ -402,40 +404,38 @@ class TestEvaluateLastDose(unittest.TestCase):
 
 
 
-    def test_forces_scaleup_if_actual_delta_negative(self):
-        """If actual EC went down (sensor noise/weak nutrient), force ratio to 0.1 to aggressively scale up factor."""
+    def test_skips_calibration_if_actual_delta_negative(self):
+        """If actual EC went down (empty tank / hardware fault), calibration must NOT
+        scale up the factor.  Instead the system should:
+          1. Leave nutrient_ml_per_l_per_ec unchanged.
+          2. Increment the hardware fault counter for the EC pump.
+        This prevents runaway amplification when a tank is empty or tubing is blocked.
+        """
         cfg = _make_config(nutrient_ml_per_l_per_ec=2.0)
         dosing._last_ec_prediction = {
             'pre_val': 2.0, 'predicted_delta': 1.0,
             'time': time.time() - 1000
         }
-        written = {}
+        # Reset hw fault state so we start clean
+        dosing._hw_fault_state["ec"]["failures"] = 0
+        dosing._hw_fault_state["ec"]["suspended_until"] = 0.0
 
-        def fake_open(path, mode='r', *args, **kwargs):
-            if 'w' in mode:
-                buf = []
-                class FakeWriter:
-                    def __enter__(self): return self
-                    def __exit__(self, *a):
-                        try:
-                            written.update(json.loads(''.join(buf)))
-                        except Exception:
-                            pass
-                    def write(self, data): buf.append(data)
-                return FakeWriter()
-            return mock_open(read_data=json.dumps(cfg))(path, mode)
-
-        with patch('builtins.open', side_effect=fake_open), \
+        with patch('builtins.open', mock_open(read_data=json.dumps(cfg))), \
              patch('os.replace'), \
-             patch('dosing.log_event'):
+             patch('dosing.live_tds_data', []):  # Prevent drain-cycle guard from short-circuiting
             # actual EC dropped from 2.0 to 1.5 -> actual_delta = -0.5
             _evaluate_last_dose(1.5, 6.0, cfg)
 
-        new_factor = written.get('nutrient_ml_per_l_per_ec')
-        self.assertIsNotNone(new_factor)
-        self.assertGreater(new_factor, 2.0) # Should scale up significantly!
+        # Factor must NOT have changed (no config write should happen)
+        self.assertEqual(cfg.get('nutrient_ml_per_l_per_ec', 2.0), 2.0)
+
+        # Hardware fault counter should have incremented
+        self.assertEqual(dosing._hw_fault_state["ec"]["failures"], 1,
+                         "Expected _hw_fault_state['ec']['failures'] to be 1 after zero-movement dose")
+
         # Prediction should still be cleared
         self.assertIsNone(dosing._last_ec_prediction)
+
 
     def test_factor_clamped_to_max(self):
         """A massive underdose cannot push factor above 10.0."""

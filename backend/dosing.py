@@ -29,6 +29,98 @@ MIN_PUMP_RUN_SEC = 2.0
 EC_INTERVENTION_HOURS = 1
 EC_RENOTIFY_HOURS = 4
 
+# ---------------------------------------------------------------------------
+# Hardware Fault Detection
+# ---------------------------------------------------------------------------
+# When a pump runs but the sensor shows zero or negative response over multiple
+# consecutive cycles, the system concludes something is physically wrong:
+# empty tank, airlocked tubing, worn peristaltic head, disconnected tube, etc.
+# After HW_FAULT_THRESHOLD consecutive failures, dosing for that pump is
+# suspended for HW_FAULT_SUSPEND_HOURS and an email alert is sent.
+# ---------------------------------------------------------------------------
+HW_FAULT_THRESHOLD = 2          # consecutive zero-movement doses before fault declared
+HW_FAULT_SUSPEND_HOURS = 4      # hours to suspend dosing after fault
+HW_FAULT_RENOTIFY_HOURS = 4     # hours between repeated fault emails
+
+# Per-pump fault state: {pump_id: {"failures": int, "suspended_until": float, "last_alert": float}}
+_hw_fault_state = {
+    3: {"failures": 0, "suspended_until": 0.0, "last_alert": 0.0},  # pH UP
+    4: {"failures": 0, "suspended_until": 0.0, "last_alert": 0.0},  # pH DOWN
+    "ec": {"failures": 0, "suspended_until": 0.0, "last_alert": 0.0},  # Nutrients (Pumps 1+2)
+}
+
+PUMP_LABEL = {
+    3: "Pump 3 (pH UP / Tank 3)",
+    4: "Pump 4 (pH DOWN / Tank 4)",
+    "ec": "Pump 1+2 (Nutrients A+B / Tanks 1&2)",
+}
+
+
+def _record_hw_fault(pump_key: str | int):
+    """Increment the failure counter for a pump. If threshold is reached,
+    suspend dosing and send a HARDWARE_FAULT_SUSPECTED alert."""
+    state = _hw_fault_state.get(pump_key)
+    if state is None:
+        return
+    state["failures"] += 1
+    if state["failures"] >= HW_FAULT_THRESHOLD:
+        now = time.time()
+        state["suspended_until"] = now + HW_FAULT_SUSPEND_HOURS * 3600
+        label = PUMP_LABEL.get(pump_key, str(pump_key))
+        msg = (
+            f"HARDWARE FAULT SUSPECTED — {label}\n\n"
+            f"The pump has dosed {state['failures']} consecutive time(s) but the "
+            f"corresponding sensor has shown zero or negative response.\n\n"
+            f"Possible causes:\n"
+            f"  • Tank is empty or nearly empty\n"
+            f"  • Tubing is kinked, airlocked, or disconnected\n"
+            f"  • Peristaltic pump head is worn or not primed\n\n"
+            f"Automatic dosing for {label} has been SUSPENDED for {HW_FAULT_SUSPEND_HOURS} hours "
+            f"to prevent wasting solution. Please inspect the hardware.\n"
+            f"Dosing will resume automatically at: "
+            f"{time.strftime('%Y-%m-%d %H:%M IST', time.localtime(state['suspended_until']))}"
+        )
+        log_event(
+            "HARDWARE_FAULT_SUSPECTED", "DANGER",
+            f"{label}: {state['failures']} consecutive zero-movement doses. "
+            f"Automatic dosing suspended for {HW_FAULT_SUSPEND_HOURS}h. Inspect hardware."
+        )
+        print(f"HARDWARE_FAULT_SUSPECTED: {label} — {state['failures']} zero-movement doses. Suspended {HW_FAULT_SUSPEND_HOURS}h.")
+        if now - state["last_alert"] >= HW_FAULT_RENOTIFY_HOURS * 3600:
+            state["last_alert"] = now
+            threading.Thread(
+                target=sensor_monitor.send_email_alert,
+                args=("SYSTEM", msg, "DANGER", True),
+                daemon=True,
+            ).start()
+
+
+def _record_hw_success(pump_key: str | int):
+    """Clear the failure counter when a dose actually moved the sensor."""
+    state = _hw_fault_state.get(pump_key)
+    if state is not None and state["failures"] > 0:
+        label = PUMP_LABEL.get(pump_key, str(pump_key))
+        log_event(
+            "HARDWARE_FAULT_RESOLVED", "INFO",
+            f"{label}: sensor responded to dose. Hardware fault cleared."
+        )
+        state["failures"] = 0
+        state["suspended_until"] = 0.0
+
+
+def _hw_suspended(pump_key: str | int) -> bool:
+    """Return True (and log a short warning) if the pump is currently suspended."""
+    state = _hw_fault_state.get(pump_key)
+    if state is None:
+        return False
+    if time.time() < state["suspended_until"]:
+        resume_str = time.strftime("%H:%M IST", time.localtime(state["suspended_until"]))
+        label = PUMP_LABEL.get(pump_key, str(pump_key))
+        print(f"HW_FAULT_SUSPENDED: {label} — skipping automatic dose until {resume_str}")
+        return True
+    return False
+
+
 def init_dosing_state():
     global last_dosing_time
     try:
@@ -328,7 +420,7 @@ def _async_dosing(ph_val, tds_val, l_ph, l_tds):
                             confirmations[0] = 0
                         return False, None
 
-                    if dose_time_3 > 0 and _tank_has_solution(3):
+                    if dose_time_3 > 0 and _tank_has_solution(3) and not _hw_suspended(3):
                         log_event("PUMP_ACTIVATION", "INFO", f"Dosed pH UP for {dose_time_3:.2f}s (Delta: {delta_ph:.2f} pH, target: {target_ph:.2f})")
                         actual_time_3 = _safe_pump_run(3, dose_time_3, stop_condition_fn=_ph_up_stop_check)
                         log_pump_action(3, actual_time_3, "Automatic", flow_rate_ml_per_sec=flow_rate_3)
@@ -421,48 +513,52 @@ def _async_dosing(ph_val, tds_val, l_ph, l_tds):
                             f"Cross-Tank Lock: Both Nutrient A (Tank 1: {'OK' if tank_1_ok else 'EMPTY'}) and Nutrient B (Tank 2: {'OK' if tank_2_ok else 'EMPTY'}) are required for balanced dosing. Dosing aborted."
                         )
                     elif dose_time_1 > 0 or dose_time_2 > 0:
-                        total_vol = (dose_time_1 * flow_rate_1) + (dose_time_2 * flow_rate_2)
-                        nutrient_impact_tracker.record_nutrient_dose(total_vol, current_ph_live)
-
-                        # PRE-COMPENSATE for nutrient acidity: predict pH drop and
-                        # check if nutrients would push pH below the safe range.
-                        # If so, skip nutrients this cycle — let the next cycle
-                        # re-evaluate after pH is fully stable.
-                        predicted_ph_drop = abs(avg_ph_impact) * total_vol
-                        predicted_ph_after = current_ph_live - predicted_ph_drop
-                        if l_ph and l_ph.is_active and predicted_ph_after < l_ph.min_value:
-                            log_event(
-                                "NUTRIENT_PH_GUARD", "INFO",
-                                f"Nutrient dose ({total_vol:.1f} mL) would drop pH from {current_ph_live:.2f} to ~{predicted_ph_after:.2f} (below {l_ph.min_value:.2f}). Skipping nutrients this cycle."
-                            )
-                            print(f"NUTRIENT_PH_GUARD: Skipping nutrients — predicted pH {predicted_ph_after:.2f} < min {l_ph.min_value:.2f}")
+                        if _hw_suspended("ec"):
+                            pass  # Suspended — skip silently (already logged inside _hw_suspended)
                         else:
-                            confirmations = [0]
-                            def _ec_stop_check():
-                                if live_tds_data and live_tds_data[-1].get("status") == "OK":
-                                    current = live_tds_data[-1].get("value")
-                                    if current is not None and current >= target_tds:
-                                        confirmations[0] += 1
-                                        if confirmations[0] >= 5:
-                                            return True, f"EC reached target {target_tds:.2f} (current: {current:.2f})"
+                            total_vol = (dose_time_1 * flow_rate_1) + (dose_time_2 * flow_rate_2)
+                            nutrient_impact_tracker.record_nutrient_dose(total_vol, current_ph_live)
+
+                            # PRE-COMPENSATE for nutrient acidity: predict pH drop and
+                            # check if nutrients would push pH below the safe range.
+                            # If so, skip nutrients this cycle — let the next cycle
+                            # re-evaluate after pH is fully stable.
+                            predicted_ph_drop = abs(avg_ph_impact) * total_vol
+                            predicted_ph_after = current_ph_live - predicted_ph_drop
+                            if l_ph and l_ph.is_active and predicted_ph_after < l_ph.min_value:
+                                log_event(
+                                    "NUTRIENT_PH_GUARD", "INFO",
+                                    f"Nutrient dose ({total_vol:.1f} mL) would drop pH from {current_ph_live:.2f} to ~{predicted_ph_after:.2f} (below {l_ph.min_value:.2f}). Skipping nutrients this cycle."
+                                )
+                                print(f"NUTRIENT_PH_GUARD: Skipping nutrients — predicted pH {predicted_ph_after:.2f} < min {l_ph.min_value:.2f}")
+                            else:
+                                confirmations = [0]
+                                def _ec_stop_check():
+                                    if live_tds_data and live_tds_data[-1].get("status") == "OK":
+                                        current = live_tds_data[-1].get("value")
+                                        if current is not None and current >= target_tds:
+                                            confirmations[0] += 1
+                                            if confirmations[0] >= 5:
+                                                return True, f"EC reached target {target_tds:.2f} (current: {current:.2f})"
+                                        else:
+                                            confirmations[0] = 0
                                     else:
                                         confirmations[0] = 0
-                                else:
-                                    confirmations[0] = 0
-                                return False, None
+                                    return False, None
 
-                            # Pump 1 (Nutrient A)
-                            if dose_time_1 > 0:
-                                log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient A for {dose_time_1:.2f}s (Delta: {delta_ec:.2f} EC)")
-                                actual_time_1 = _safe_pump_run(1, dose_time_1, stop_condition_fn=_ec_stop_check)
-                                log_pump_action(1, actual_time_1, "Automatic", flow_rate_ml_per_sec=flow_rate_1)
-                                _last_ec_prediction = {'pre_val': tds_val, 'predicted_delta': delta_ec, 'time': time.time()}
-                                time.sleep(nut_gap_s)
-                            # Pump 2 (Nutrient B)
-                            if dose_time_2 > 0:
-                                log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient B for {dose_time_2:.2f}s")
-                                actual_time_2 = _safe_pump_run(2, dose_time_2, stop_condition_fn=_ec_stop_check)
-                                log_pump_action(2, actual_time_2, "Automatic", flow_rate_ml_per_sec=flow_rate_2)
+                                # Pump 1 (Nutrient A)
+                                if dose_time_1 > 0:
+                                    log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient A for {dose_time_1:.2f}s (Delta: {delta_ec:.2f} EC)")
+                                    actual_time_1 = _safe_pump_run(1, dose_time_1, stop_condition_fn=_ec_stop_check)
+                                    log_pump_action(1, actual_time_1, "Automatic", flow_rate_ml_per_sec=flow_rate_1)
+                                    _last_ec_prediction = {'pre_val': tds_val, 'predicted_delta': delta_ec, 'time': time.time()}
+                                    time.sleep(nut_gap_s)
+                                # Pump 2 (Nutrient B)
+                                if dose_time_2 > 0:
+                                    log_event("PUMP_ACTIVATION", "INFO", f"Dosed Nutrient B for {dose_time_2:.2f}s")
+                                    actual_time_2 = _safe_pump_run(2, dose_time_2, stop_condition_fn=_ec_stop_check)
+                                    log_pump_action(2, actual_time_2, "Automatic", flow_rate_ml_per_sec=flow_rate_2)
+
             elif l_tds and l_tds.is_active and tds_val > l_tds.max_value:
                 log_event("EC_DANGER_ALARM", "ALARM", f"EC value {tds_val} exceeds limit {l_tds.max_value}. Dosing halted.", {"current_ec": tds_val})
 
@@ -496,20 +592,27 @@ def _evaluate_last_dose(current_tds, current_ph, config):
         actual_delta = current_tds - _last_ec_prediction['pre_val']
         predicted_delta = _last_ec_prediction['predicted_delta']
         if predicted_delta > 0:
-            ratio = actual_delta / predicted_delta if actual_delta > 0 else 0.1
+            ratio = actual_delta / predicted_delta if actual_delta > 0 else None
             current_factor = float(config.get("nutrient_ml_per_l_per_ec", 2.0))
-            correction = current_factor / ratio
-            new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
-            new_factor = max(0.5, min(new_factor, 50.0))
-            config["nutrient_ml_per_l_per_ec"] = new_factor
-            save_system_config(config)
-            log_event("DOSING_CALIBRATION", "INFO",
-                      f"EC factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
-        elif actual_delta <= 0:
-            # No EC movement after dose: do NOT adjust the factor upward.
-            # This prevents runaway when the tank is empty or a blockage exists.
-            log_event("CALIBRATION_SKIP_NO_MOVEMENT", "WARNING",
-                      f"EC calibration skipped — no EC rise observed after dose (pre: {_last_ec_prediction['pre_val']:.2f}, current: {current_tds:.2f}). Check Tank 1/2 levels and tubing.")
+            if ratio is not None and ratio > 0:
+                correction = current_factor / ratio
+                new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
+                new_factor = max(0.5, min(new_factor, current_factor * 2.0, 50.0))
+                config["nutrient_ml_per_l_per_ec"] = new_factor
+                save_system_config(config)
+                log_event("DOSING_CALIBRATION", "INFO",
+                          f"EC factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
+                _record_hw_success("ec")
+            else:
+                # actual_delta <= 0: sensor showed no rise after dose.
+                # Do NOT scale up the factor — that compounds errors when the tank
+                # is empty or the tubing is blocked.
+                log_event("CALIBRATION_SKIP_NO_MOVEMENT", "WARNING",
+                          f"EC calibration skipped — no EC rise observed after dose "
+                          f"(pre: {_last_ec_prediction['pre_val']:.2f}, current: {current_tds:.2f}). "
+                          f"Check Tank 1/2 levels and tubing.")
+                _record_hw_fault("ec")
+
         _last_ec_prediction = None
 
     if _last_ph_up_prediction:
@@ -527,6 +630,7 @@ def _evaluate_last_dose(current_tds, current_ph, config):
                           f"pH UP calibration skipped — no pH rise observed after {_last_ph_up_prediction['predicted_delta']:.2f} pH dose "
                           f"(pre: {_last_ph_up_prediction['pre_val']:.2f}, current: {current_ph:.2f}). "
                           f"Check Tank 3 (pH UP) level and tubing. Current factor: {current_factor:.4f}")
+                _record_hw_fault(3)
             else:
                 correction = current_factor / ratio
                 new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
@@ -536,6 +640,7 @@ def _evaluate_last_dose(current_tds, current_ph, config):
                 save_system_config(config)
                 log_event("DOSING_CALIBRATION", "INFO",
                           f"pH UP factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
+                _record_hw_success(3)
         _last_ph_up_prediction = None
 
 
@@ -550,6 +655,7 @@ def _evaluate_last_dose(current_tds, current_ph, config):
                           f"pH DOWN calibration skipped — no pH drop observed after dose "
                           f"(pre: {_last_ph_down_prediction['pre_val']:.2f}, current: {current_ph:.2f}). "
                           f"Check Tank 4 (pH DOWN) level and tubing. Current factor: {current_factor:.4f}")
+                _record_hw_fault(4)
             else:
                 correction = current_factor / ratio
                 new_factor = round(current_factor * 0.8 + correction * 0.2, 4)
@@ -558,6 +664,7 @@ def _evaluate_last_dose(current_tds, current_ph, config):
                 save_system_config(config)
                 log_event("DOSING_CALIBRATION", "INFO",
                           f"pH DOWN factor adjusted: {current_factor:.4f} -> {new_factor:.4f} (ratio: {ratio:.2f})")
+                _record_hw_success(4)
         _last_ph_down_prediction = None
 
 
