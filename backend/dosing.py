@@ -112,10 +112,15 @@ def reset_hw_fault(pump_key: str | int | None = None):
     """Manually reset hardware fault suspension for a specific pump or all pumps.
     Can be called manually, from UI pump priming, or via REST API."""
     if pump_key is None:
+        was_faulted = any(s["failures"] > 0 or s["suspended_until"] > 0 for s in _hw_fault_state.values())
         for k, state in _hw_fault_state.items():
             state["failures"] = 0
             state["suspended_until"] = 0.0
-        log_event("HARDWARE_FAULT_RESET", "INFO", "All hardware fault suspensions reset manually.")
+        if was_faulted:
+            try:
+                log_event("HARDWARE_FAULT_RESET", "INFO", "All hardware fault suspensions reset manually.")
+            except Exception:
+                pass
     else:
         key = "ec" if pump_key in (1, 2, "1", "2", "ec") else pump_key
         try:
@@ -124,10 +129,15 @@ def reset_hw_fault(pump_key: str | int | None = None):
             pass
         state = _hw_fault_state.get(key)
         if state is not None:
+            was_faulted = state["failures"] > 0 or state["suspended_until"] > 0
             state["failures"] = 0
             state["suspended_until"] = 0.0
-            label = PUMP_LABEL.get(key, str(key))
-            log_event("HARDWARE_FAULT_RESET", "INFO", f"{label}: hardware fault suspension reset manually.")
+            if was_faulted:
+                label = PUMP_LABEL.get(key, str(key))
+                try:
+                    log_event("HARDWARE_FAULT_RESET", "INFO", f"{label}: hardware fault suspension reset manually.")
+                except Exception:
+                    pass
 
 
 def get_hw_fault_status() -> dict:
@@ -877,6 +887,7 @@ def _reset_dosing_state():
     _ec_intervention_last_sent = None
     _is_system_halt_alert_sent = False
     _consecutive_halt_ticks = 0
+    reset_hw_fault()
     try:
         import sensors
         if hasattr(sensors, 'circulation_tracker'):
