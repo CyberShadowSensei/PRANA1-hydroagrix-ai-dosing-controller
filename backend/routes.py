@@ -86,7 +86,8 @@ def s_active_plant():
                 sorted_stages = sorted(stages.items(), key=lambda x: x[1].get('start_day', 0))
                 if sorted_stages:
                     s.plant_stage = sorted_stages[0][0]
-            except: pass
+            except Exception:
+                pass
     db.session.commit()
     socketio.emit('grow_cycle_update', grow_cycle_helper.get_active_grow_cycle_details())
     try:
@@ -768,7 +769,7 @@ def _async_send_report_email_worker(app_obj, include_ml_analysis=True):
             if not success:
                 try:
                     db.session.rollback()
-                except:
+                except Exception:
                     pass
                 log_event("EMAIL_ERROR", "ERROR", f"Report email dispatch failed: {msg}")
                 return False, msg
@@ -776,7 +777,7 @@ def _async_send_report_email_worker(app_obj, include_ml_analysis=True):
         except Exception as e:
             try:
                 db.session.rollback()
-            except:
+            except Exception:
                 pass
             log_event("EMAIL_ERROR", "ERROR", f"Report email dispatch failed: {str(e)}")
             return False, str(e)
