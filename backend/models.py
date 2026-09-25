@@ -15,7 +15,8 @@ class LightBulb(db.Model):
     date = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
     
     def to_json(self):
-        localized_date = self.date.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.date or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "status": self.status,
@@ -29,7 +30,8 @@ class MoistureSensorData(db.Model):
     date = db.Column(db.DateTime, default=db.func.current_timestamp(), index=True)
     
     def to_json(self):
-        localized_date = self.date.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.date or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "moisture_level": self.moisture_level,
@@ -45,7 +47,8 @@ class TemperatureHumidityData(db.Model):
     archived = db.Column(db.Boolean, default=False)
     
     def to_json(self):
-        localized_date = self.date.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.date or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "temperature": self.temperature,
@@ -60,7 +63,8 @@ class PhotoRecord(db.Model):
     captured_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     def to_json(self):
-        localized_date = self.captured_at.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.captured_at or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "filename": self.filename,
@@ -115,7 +119,8 @@ class SensorLimits(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     def to_json(self):
-        localized_date = self.updated_at.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.updated_at or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "sensor_type": self.sensor_type,
@@ -176,7 +181,8 @@ class PresetAuditLog(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
     def to_json(self):
-        localized_date = self.timestamp.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.timestamp or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "action": self.action,
@@ -194,7 +200,8 @@ class PumpLog(db.Model):
     archived = db.Column(db.Boolean, default=False)
 
     def to_json(self):
-        localized_date = self.timestamp.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.timestamp or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "pump_name": self.pump_name,
@@ -213,7 +220,8 @@ class EventLog(db.Model):
     archived = db.Column(db.Boolean, default=False)
 
     def to_json(self):
-        localized_date = self.timestamp.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.timestamp or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         details = {}
         if self.details_json:
             try:
@@ -240,7 +248,8 @@ class EmailBacklog(db.Model):
     alert_type = db.Column(db.String(50), nullable=True) # DANGER or REPORT
     
     def to_json(self):
-        localized_date = self.created_at.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.created_at or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "subject": self.subject,
@@ -283,7 +292,8 @@ class EmailAuditLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     def to_json(self):
-        localized_date = self.created_at.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
+        ts_obj = self.created_at or datetime.utcnow()
+        localized_date = ts_obj.replace(tzinfo=pytz.UTC).astimezone(DEFAULT_TIMEZONE)
         return {
             "id": self.id,
             "subject": self.subject,

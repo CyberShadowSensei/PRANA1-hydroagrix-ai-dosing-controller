@@ -236,8 +236,8 @@ const Dashboard = () => {
 
     const phaseName = cycleStatus?.phase || "active";
 
-    // 1. pH Warnings (with Tank 3/4 empty context)
-    if (phLimits && currentPH.value !== null && currentPH.value !== undefined) {
+    // 1. pH Warnings (with Tank 3/4 empty context & drain cycle suppression)
+    if (!isDrainCycle && phLimits && currentPH.value !== null && currentPH.value !== undefined) {
       const { min, max } = phLimits;
       const val = currentPH.value;
       if (val < min) {
@@ -278,12 +278,7 @@ const Dashboard = () => {
     }
 
     // 2. EC / TDS Warnings (with drain-cycle suppression & Tank 1/2 empty context)
-    if (patternStatus === 'RETURN_TIMEOUT_FAULT') {
-      warnings.push({
-        message: `Water Return Timeout: EC probe has been dry for > 35 minutes. Check channel drainage siphon and return pump operation.`,
-        severity: 'red',
-      });
-    } else if (!isDrainCycle && ecLimits && currentTDS.value !== null && currentTDS.value !== undefined) {
+    if (!isDrainCycle && ecLimits && currentTDS.value !== null && currentTDS.value !== undefined) {
       const { min, max } = ecLimits;
       const val = currentTDS.value;
       if (val < min) {
@@ -500,6 +495,7 @@ const Dashboard = () => {
     socket.on('limits_updated', handleLimitsUpdated);
     socket.on('grow_cycle_update', handleCycleUpdated);
     socket.on('pump_activity', handlePumpActivity);
+    socket.on('tank_levels_updated', handlePumpActivity);
 
     return () => {
       controller.abort();
@@ -509,6 +505,7 @@ const Dashboard = () => {
       socket.off('limits_updated', handleLimitsUpdated);
       socket.off('grow_cycle_update', handleCycleUpdated);
       socket.off('pump_activity', handlePumpActivity);
+      socket.off('tank_levels_updated', handlePumpActivity);
     };
 
   }, []);

@@ -28,11 +28,13 @@ const TankLevels = () => {
   useEffect(() => {
     fetchTanks();
     
-    // Listen to pump_activity socket events and update
+    // Listen to pump_activity and tank_levels_updated socket events and update
     socket.on('pump_activity', fetchTanks);
+    socket.on('tank_levels_updated', fetchTanks);
     
     return () => {
       socket.off('pump_activity', fetchTanks);
+      socket.off('tank_levels_updated', fetchTanks);
     };
   }, []);
 

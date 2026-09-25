@@ -22,7 +22,7 @@ except ImportError:
     sys.modules['cv2'] = MagicMock()
 
 from config import app, db
-from models import PlantStageStatus, PlantPreset
+from models import PlantStageStatus, PlantPreset, NutrientObservations, SystemAlerts, ActionTokens, SolutionTanks
 from checkSensorMail import SensorMonitor
 import routes  # registers Flask routes on the app instance
 

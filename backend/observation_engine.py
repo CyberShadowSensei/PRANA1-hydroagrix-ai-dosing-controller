@@ -25,13 +25,23 @@ class NutrientImpactTracker:
             pre_ph = self.pending_evaluation["pre_ph"]
             delta = current_ph - pre_ph
             
+            # OUTLIER CLAMPING: Guard against manual chemical additions.
+            # If someone pours acid in mid-dose, the delta will be massive.
+            # We cap the recorded delta to +/- 0.05 pH per mL so it doesn't corrupt the historical average.
+            if vol > 0:
+                impact_per_ml = delta / vol
+                clamped_impact_per_ml = max(-0.05, min(0.05, impact_per_ml))
+                clamped_delta = clamped_impact_per_ml * vol
+            else:
+                clamped_delta = 0
+
             with app.app_context():
                 obs = NutrientObservations(
                     dose_type="NUTRIENT_A_B",
                     volume_ml=vol,
                     pre_ph=pre_ph,
                     post_ph=current_ph,
-                    delta_ph=delta
+                    delta_ph=clamped_delta  # Store the clamped value
                 )
                 db.session.add(obs)
                 db.session.commit()
@@ -39,18 +49,33 @@ class NutrientImpactTracker:
             self.pending_evaluation = None
 
     def get_average_ph_impact_per_ml(self):
-        """Returns historical average delta pH per ml of nutrient dosed (typically negative/acidic)."""
+        """Returns historical average delta pH per ml of nutrient dosed using Robust EMA."""
         with app.app_context():
-            recent_obs = NutrientObservations.query.order_by(NutrientObservations.id.desc()).limit(10).all()
+            # Only fetch last 6 doses (low CPU overhead, fast adaptation)
+            recent_obs = NutrientObservations.query.order_by(NutrientObservations.id.desc()).limit(6).all()
             if not recent_obs:
                 return -0.005 # Fallback default
             
-            total_delta = sum(obs.delta_ph for obs in recent_obs)
-            total_vol = sum(obs.volume_ml for obs in recent_obs)
+            # Reverse to chronological order (oldest to newest)
+            recent_obs.reverse()
+
+            # Base EMA weighting (30% new data, 70% historical)
+            alpha = 0.3
+            ema_impact = -0.005 # Baseline starting point
             
-            if total_vol > 0:
-                return total_delta / total_vol
-            return -0.005
+            for obs in recent_obs:
+                if obs.volume_ml > 0:
+                    current_impact = obs.delta_ph / obs.volume_ml
+                    
+                    # TREND REVERSAL DETECTION:
+                    # If historical EMA is acidic (-) and new dose is clearly basic (+),
+                    # increase alpha to 60% to cross the zero-line and adapt to the new chemical faster.
+                    if (ema_impact < 0 and current_impact > 0.002) or (ema_impact > 0 and current_impact < -0.002):
+                        ema_impact = (current_impact * 0.6) + (ema_impact * 0.4)
+                    else:
+                        ema_impact = (current_impact * alpha) + (ema_impact * (1 - alpha))
+
+            return ema_impact
 
 nutrient_impact_tracker = NutrientImpactTracker()
 

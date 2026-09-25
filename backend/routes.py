@@ -499,18 +499,22 @@ def ch_a(): check_and_adjust_sensors(); return jsonify({"message": "OK"}), 200
 
 @app.route("/get_tank_levels", methods=["GET"])
 def get_tank_levels():
-    db_tanks = SolutionTanks.query.order_by(SolutionTanks.tank_id).all()
-    if db_tanks:
-        return jsonify([
-            {
-                "tank_id": t.tank_id,
-                "name": t.name,
-                "capacity_ml": t.capacity_ml,
-                "current_volume_ml": t.current_volume_ml,
-                "last_alert_sent": t.last_alert_sent or 0.0
-            }
-            for t in db_tanks
-        ]), 200
+    try:
+        db_tanks = SolutionTanks.query.order_by(SolutionTanks.tank_id).all()
+        if db_tanks:
+            return jsonify([
+                {
+                    "tank_id": t.tank_id,
+                    "name": t.name,
+                    "capacity_ml": t.capacity_ml,
+                    "current_volume_ml": t.current_volume_ml,
+                    "last_alert_sent": t.last_alert_sent or 0.0
+                }
+                for t in db_tanks
+            ]), 200
+    except Exception as e:
+        print(f"DEBUG: get_tank_levels DB fetch failed (falling back to cache): {e}")
+
     import db_cache
     tanks = db_cache.get_solution_tanks()
     return jsonify([
@@ -762,12 +766,18 @@ def _async_send_report_email_worker(app_obj, include_ml_analysis=True):
             
             success, msg = sensor_monitor.send_report("Daily System Digest", body_text, attachments, html_body=body_html)
             if not success:
-                db.session.rollback()
+                try:
+                    db.session.rollback()
+                except:
+                    pass
                 log_event("EMAIL_ERROR", "ERROR", f"Report email dispatch failed: {msg}")
                 return False, msg
             return True, "Email sent successfully"
         except Exception as e:
-            db.session.rollback()
+            try:
+                db.session.rollback()
+            except:
+                pass
             log_event("EMAIL_ERROR", "ERROR", f"Report email dispatch failed: {str(e)}")
             return False, str(e)
         finally:

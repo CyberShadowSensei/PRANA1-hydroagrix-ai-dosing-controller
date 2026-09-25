@@ -73,7 +73,7 @@ class TestDosing(unittest.TestCase):
         mock_log_event.assert_any_call(
             "PUMP_ACTIVATION",
             "INFO",
-            "Dosed Nutrient A for 30.00s (Delta: 0.70 EC)"
+            "Dosed Nutrient A for 30.00s (Delta: 0.40 EC)"
         )
         mock_log_event.assert_any_call(
             "PUMP_ACTIVATION",
@@ -95,7 +95,7 @@ class TestDosing(unittest.TestCase):
     def test_dosing_ph_down_midpoint(
         self, mock_log_event, mock_log_pump, mock_sleep, mock_stop, mock_start, mock_file_open, mock_exists
     ):
-        """Verify pH DOWN dosing targets midpoint, logs event ID, and uses pump 4 flow rate."""
+        """Verify pH DOWN dosing targets buffer edge, logs event ID, and uses pump 4 flow rate."""
         mock_exists.return_value = True
         config_data = """{
             "reservoir_volume_l": 50.0,
@@ -115,7 +115,7 @@ class TestDosing(unittest.TestCase):
         mock_log_event.assert_any_call(
             "PUMP_ACTIVATION",
             "INFO",
-            "Dosed pH DOWN for 12.50s (Delta: 1.00 pH)"
+            "Dosed pH DOWN for 12.50s (Delta: 0.70 pH, target: 6.30)"
         )
         mock_log_pump.assert_any_call(4, 12.5, "Automatic", flow_rate_ml_per_sec=1.0)
 
@@ -428,8 +428,9 @@ class TestDosing(unittest.TestCase):
         mock_log_event.assert_any_call(
             "PUMP_ACTIVATION",
             "INFO",
-            "Dosed pH UP for 12.50s (Delta: 1.00 pH)"
+            "Dosed pH UP for 12.50s (Delta: 0.70 pH, target: 5.70)"
         )
+        # Pump 3 corresponds to pH UP
         mock_log_pump.assert_any_call(3, 12.5, "Automatic", flow_rate_ml_per_sec=1.0)
         self.assertIsNotNone(dosing._last_ph_up_prediction)
         self.assertEqual(dosing._last_ph_up_prediction['pre_val'], 5.0)
@@ -616,11 +617,11 @@ class TestDosing(unittest.TestCase):
             return tank_id != 3
         mock_permission.side_effect = perm_side_effect
         
-        # pH is 6.0 (safely inside 5.8 - 6.2)
+        # pH is 6.15 (safely near max, which satisfies NUTRIENT_PH_GUARD)
         l_ph = DummyLimit(5.8, 6.2, is_active=True)
         l_tds = DummyLimit(1.0, 2.0, is_active=True)
         
-        _async_dosing(ph_val=6.0, tds_val=0.8, l_ph=l_ph, l_tds=l_tds)
+        _async_dosing(ph_val=6.15, tds_val=0.8, l_ph=l_ph, l_tds=l_tds)
         
         # Pump 1 and 2 should have run
         mock_start.assert_any_call(1)

@@ -111,32 +111,35 @@ def aggregation_loop():
         try:
             with app.app_context():
                 if live_ph_data:
-                    n = len(live_ph_data)
-                    tot_ph, tot_w, tot_a = 0.0, 0.0, 0.0
-                    for d in live_ph_data:
-                        tot_ph += d["value"]
-                        tot_w += d.get("water_temp", 25.0)
-                        tot_a += d.get("air_temp", 25.0)
-                    db.session.add(PHData(
-                        ph_value=round(tot_ph / n, 2),
-                        water_temp=round(tot_w / n, 2),
-                        air_temp=round(tot_a / n, 2)
-                    ))
+                    # Filter out drain cycle dips so 10-minute DB average represents true submerged pH
+                    submerged_ph = [d for d in live_ph_data if d.get("status") in ("OK", "DRAIN_CYCLE") and not d.get("is_drain_cycle")]
+                    if submerged_ph:
+                        n = len(submerged_ph)
+                        tot_ph, tot_w, tot_a = 0.0, 0.0, 0.0
+                        for d in submerged_ph:
+                            tot_ph += d["value"]
+                            tot_w += d.get("water_temp", 25.0)
+                            tot_a += d.get("air_temp", 25.0)
+                        db.session.add(PHData(
+                            ph_value=round(tot_ph / n, 2),
+                            water_temp=round(tot_w / n, 2),
+                            air_temp=round(tot_a / n, 2)
+                        ))
                 if live_tds_data:
                     # Filter out drain cycle dips so 10-minute DB average represents true submerged nutrient concentration
                     submerged_tds = [d for d in live_tds_data if d.get("status") == "OK" and not d.get("is_drain_cycle")]
-                    target_tds_data = submerged_tds if submerged_tds else list(live_tds_data)
-                    n = len(target_tds_data)
-                    tot_tds, tot_w, tot_a = 0.0, 0.0, 0.0
-                    for d in target_tds_data:
-                        tot_tds += d.get("effective_value", d["value"])
-                        tot_w += d.get("water_temp", 25.0)
-                        tot_a += d.get("air_temp", 25.0)
-                    db.session.add(TDSData(
-                        tds_value=round(tot_tds / n, 2),
-                        water_temp=round(tot_w / n, 2),
-                        air_temp=round(tot_a / n, 2)
-                    ))
+                    if submerged_tds:
+                        n = len(submerged_tds)
+                        tot_tds, tot_w, tot_a = 0.0, 0.0, 0.0
+                        for d in submerged_tds:
+                            tot_tds += d.get("effective_value", d["value"])
+                            tot_w += d.get("water_temp", 25.0)
+                            tot_a += d.get("air_temp", 25.0)
+                        db.session.add(TDSData(
+                            tds_value=round(tot_tds / n, 2),
+                            water_temp=round(tot_w / n, 2),
+                            air_temp=round(tot_a / n, 2)
+                        ))
                 if live_th_data:
                     n = len(live_th_data)
                     tot_t, tot_h = 0.0, 0.0
@@ -539,6 +542,10 @@ if __name__ == "__main__":
         db.session.commit()
         import db_cache
         db_cache.init_cache(app, db)
+        
+        from dosing import init_dosing_state
+        init_dosing_state()
+        
         log_event("SYSTEM_STARTUP", "SYSTEM", "Controller service initialized successfully.")
         
         # Start ML loop if active

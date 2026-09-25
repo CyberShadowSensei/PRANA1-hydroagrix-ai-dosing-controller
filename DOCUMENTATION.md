@@ -1,9 +1,9 @@
 # Prana 1 - Complete System Documentation
 
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
-> **Last Updated:** August 2026  
+> **Last Updated:** September 2026  
 > **Repository:** `CyberShadowSensei/hydroagrix-ai-dosing-controller`  
-> **System Status:** Production Ready & Verified (240 Automated Tests Passing: 209 Backend Pytest + 31 Frontend Vitest)
+> **System Status:** Production Ready & Verified (242 Automated Tests Passing: 211 Backend Pytest + 31 Frontend Vitest)
 
 
 ---
@@ -246,18 +246,51 @@ The system calculates fluid inventory for all 4 dosing bottles (`SolutionTanks`)
 ### 6.1 Dosing Execution Flow (`backend/dosing.py`)
 ```
 1. check_and_adjust_sensors() triggered every 500ms
-2. Check Cooldown Timer (default: 15 minutes between dosing cycles)
-3. Check Safety Bounds:
-   - If pH < 3.0 or > 10.0 OR EC >= 8.0 mS/cm: Trigger EMERGENCY HALT, stop all pumps, send DANGER email.
-4. Calculate Required Dose Volume & Motor Runtime:
-   - Volume (mL) = Delta * Reservoir_Volume_L * Nutrient_Factor (mL/L/EC)
-   - Runtime (sec) = (Volume (mL) / Motor_Flow_Rate_mL_per_min) * 60 = Volume (mL) / Pump_Flow_Rate_mL_per_sec
+2. Cooldown Gate: Default 15 minutes between dosing cycles.
+   - Cooldown state is PERSISTED across backend restarts by reading the most recent
+     Automatic PumpLog entry from the database on startup (init_dosing_state).
+     This prevents immediate re-dosing after a service restart.
+3. Drain Cycle Gate: Dosing is BLOCKED while is_drain_cycle == True to prevent
+   dosing into a reservoir with a dry/unsubmerged probe.
+4. Safety Bounds Check:
+   - pH < 3.0 or > 10.0:  Plant safety EMERGENCY HALT (pH critical limits).
+   - EC >= 8.0 mS/cm:     Hardware safety EMERGENCY HALT.
+   - Stops all pumps, logs CRITICAL_HALT, sends DANGER email.
+   - 10 consecutive halt ticks required before alert to filter transient spikes.
+5. pH Dosing FIRST (before nutrients):
+   - pH is corrected before nutrients because nutrients are acidic and drop pH.
+   - Dosing nutrients first into a low-pH reservoir wastes chemicals and
+     triggers a correction fight-loop.
+   - Overshoot Fix: Targets the BOUNDARY with a 20% buffer, not the midpoint.
+     (e.g., pH too low → target = min + 20% of range, not the midpoint)
+     Aiming for the midpoint causes large deltas that overshoot past the opposite
+     limit and create oscillation.
+   - Mid-Dose Target Cutoff: _safe_pump_run() polls a stop_condition_fn every 0.1s.
+     If pH reaches the target DURING the dose (5 consecutive confirmed readings),
+     the pump stops early to prevent overshoot.
+6. Nutrient (EC) Dosing AFTER pH is corrected:
+   - Blocked if current pH is below the dynamic minimum (l_ph.min_value + 0.1 buffer
+     when nutrient pH impact is known to be negative).
+   - Cross-Tank Dependency Lock: If Tank 3 (pH UP) is empty AND pH is below minimum,
+     nutrient dosing (Pumps 1+2) is BLOCKED to protect the reservoir from acidification.
+   - Nutrient Pair Balance Lock: Both Tank 1 (A) and Tank 2 (B) must be available.
+     Neither nutrient doses alone.
+   - Nutrient pH Guard: Predicts the pH drop from the planned dose. If the predicted
+     post-dose pH would fall below the minimum, the nutrient dose is skipped this cycle.
+   - Overshoot Fix: EC targets min + 20% of range, not midpoint.
+   - Mid-Dose Target Cutoff: Same mechanism as pH — pump stops early if EC target reached.
+7. Calculate Required Dose Volume & Motor Runtime:
+   - Volume (mL) = Delta * Reservoir_Volume_L * Chemical_Factor (mL/L/unit)
+   - Runtime (sec) = Volume (mL) / Pump_Flow_Rate_mL_per_sec
    - Enforce Min Runtime (min_dose_time_sec = 2.0s) & Max Ceiling (max_dose_time_sec = 300.0s)
-   - Note: Growers configure standard motor ratings in mL/min (e.g., 50 mL/min, 37 mL/min) or mL/s via the Settings tab. The system handles all unit conversions and runtime derivations automatically.
-5. Run Pumps safely (_safe_pump_run):
-   - Poll cancel_dosing_flag every 0.1s. If operator presses manual stop, pump halts instantly (<100ms).
-6. Auto-Self-Calibration (_evaluate_last_dose):
-   - After cooldown, compare actual sensor delta vs predicted delta and adjust dosing factors automatically.
+   - Growers configure motor ratings in mL/min or mL/s via the Settings tab.
+8. Auto-Self-Calibration (_evaluate_last_dose):
+   - After cooldown, compares actual sensor delta vs predicted delta.
+   - Updates dosing factors (nutrient_ml_per_l_per_ec, ph_up_ml_per_l_per_ph,
+     ph_down_ml_per_l_per_ph) using an EMA: new_factor = old * 0.8 + correction * 0.2.
+   - Calibration is DEFERRED during drain cycles to prevent corrupt factors from
+     dry probe readings.
+   - Factor caps: EC [0.5, 50.0], pH UP/DOWN [0.1, 50.0].
 ```
 
 ### 6.2 Computer Vision Crop Stage Classifier (`backend/camera_ml.py`)
@@ -335,11 +368,11 @@ npm install
 
 ### 8.2 Running the Full Automated Test Suite
 ```bash
-# Run backend pytest suite (209 unit, edge-case, integration & stress tests)
+# Run backend pytest suite (211 unit, edge-case, integration & stress tests)
 cd backend
 python -m pytest -v --tb=short -p no:cacheprovider
 
-# Run frontend vitest suite (29 component, store, & UI tests)
+# Run frontend vitest suite (31 component, store, & UI tests)
 cd ../frontend
 npm test
 ```

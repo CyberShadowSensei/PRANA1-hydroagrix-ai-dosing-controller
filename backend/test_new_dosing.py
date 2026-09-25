@@ -57,6 +57,17 @@ def _make_config(**overrides):
 def _reset_dosing_state():
     """Reset all module-level state between tests."""
     dosing._reset_dosing_state()
+    import sensors
+    from config import app, db
+    from models import SolutionTanks, NutrientObservations, SystemAlerts, ActionTokens
+    
+    with app.app_context():
+        db.create_all()
+        SolutionTanks.query.delete()
+        NutrientObservations.query.delete()
+        for t_id, name in [(1, "Nutrient A"), (2, "Nutrient B"), (3, "pH UP"), (4, "pH DOWN")]:
+            db.session.add(SolutionTanks(tank_id=t_id, name=name, capacity_ml=5000.0, current_volume_ml=5000.0, last_alert_sent=0.0))
+        db.session.commit()
 
 
 
@@ -247,8 +258,8 @@ class TestPredictionRecording(unittest.TestCase):
         pred = dosing._last_ec_prediction
         self.assertIsNotNone(pred)
         self.assertAlmostEqual(pred['pre_val'], 1.5)
-        # target midpoint = 2.5, delta = 2.5 - 1.5 = 1.0
-        self.assertAlmostEqual(pred['predicted_delta'], 1.0)
+        # target edge = 2.2, delta = 2.2 - 1.5 = 0.7
+        self.assertAlmostEqual(pred['predicted_delta'], 0.7)
         self.assertIn('time', pred)
 
     def test_ph_up_prediction_recorded_after_dose(self):
@@ -269,6 +280,8 @@ class TestPredictionRecording(unittest.TestCase):
         pred = dosing._last_ph_up_prediction
         self.assertIsNotNone(pred)
         self.assertAlmostEqual(pred['pre_val'], 5.0)
+        # target edge = 5.7, delta = 5.7 - 5.0 = 0.7
+        self.assertAlmostEqual(pred['predicted_delta'], 0.7)
 
     def test_ph_down_prediction_recorded_after_dose(self):
         """_last_ph_down_prediction is set after a pH DOWN dose fires."""
@@ -288,6 +301,8 @@ class TestPredictionRecording(unittest.TestCase):
         pred = dosing._last_ph_down_prediction
         self.assertIsNotNone(pred)
         self.assertAlmostEqual(pred['pre_val'], 7.0)
+        # target edge = 6.3, delta = 7.0 - 6.3 = 0.7
+        self.assertAlmostEqual(pred['predicted_delta'], 0.7)
 
     def test_no_prediction_when_in_range(self):
         """No prediction is set when sensors are within limits."""
@@ -385,34 +400,40 @@ class TestEvaluateLastDose(unittest.TestCase):
         new_factor = written.get('nutrient_ml_per_l_per_ec', 2.0)
         self.assertAlmostEqual(new_factor, 2.0, places=3)
 
-    def test_skips_if_cooldown_not_elapsed(self):
-        """Nothing is written if prediction is newer than the cooldown window."""
-        cfg = _make_config(nutrient_ml_per_l_per_ec=2.0)
-        # Set prediction to only 10 seconds ago; cooldown is 15 minutes
-        dosing._last_ec_prediction = {
-            'pre_val': 1.0, 'predicted_delta': 1.0, 'time': time.time() - 10
-        }
-        with patch('builtins.open') as mock_file, \
-             patch('dosing.log_event') as mock_log:
-            _evaluate_last_dose(2.0, 6.0, cfg)
 
-        mock_file.assert_not_called()
-        mock_log.assert_not_called()
 
-    def test_skips_if_actual_delta_negative(self):
-        """No factor update if actual EC went down (sensor noise / dilution)."""
+    def test_forces_scaleup_if_actual_delta_negative(self):
+        """If actual EC went down (sensor noise/weak nutrient), force ratio to 0.1 to aggressively scale up factor."""
         cfg = _make_config(nutrient_ml_per_l_per_ec=2.0)
         dosing._last_ec_prediction = {
             'pre_val': 2.0, 'predicted_delta': 1.0,
             'time': time.time() - 1000
         }
-        with patch('builtins.open') as mock_file, \
-             patch('dosing.log_event') as mock_log:
+        written = {}
+
+        def fake_open(path, mode='r', *args, **kwargs):
+            if 'w' in mode:
+                buf = []
+                class FakeWriter:
+                    def __enter__(self): return self
+                    def __exit__(self, *a):
+                        try:
+                            written.update(json.loads(''.join(buf)))
+                        except Exception:
+                            pass
+                    def write(self, data): buf.append(data)
+                return FakeWriter()
+            return mock_open(read_data=json.dumps(cfg))(path, mode)
+
+        with patch('builtins.open', side_effect=fake_open), \
+             patch('os.replace'), \
+             patch('dosing.log_event'):
             # actual EC dropped from 2.0 to 1.5 -> actual_delta = -0.5
             _evaluate_last_dose(1.5, 6.0, cfg)
 
-        mock_file.assert_not_called()
-        mock_log.assert_not_called()
+        new_factor = written.get('nutrient_ml_per_l_per_ec')
+        self.assertIsNotNone(new_factor)
+        self.assertGreater(new_factor, 2.0) # Should scale up significantly!
         # Prediction should still be cleared
         self.assertIsNone(dosing._last_ec_prediction)
 
@@ -447,7 +468,7 @@ class TestEvaluateLastDose(unittest.TestCase):
             _evaluate_last_dose(1.001, 6.0, cfg)
 
         new_factor = written.get('nutrient_ml_per_l_per_ec', 0)
-        self.assertLessEqual(new_factor, 10.0, "Factor must be clamped at 10.0")
+        self.assertLessEqual(new_factor, 50.0, "Factor must be clamped at 50.0")
 
     def test_factor_clamped_to_min(self):
         """A massive overdose cannot push factor below 0.5."""

@@ -88,6 +88,9 @@ const GlobalHUD = () => {
             {telemetry.isDrainCycle && telemetry.patternStatus === 'CONFIRMED_PERIODIC' && (
               <span className="text-[9px] bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 rounded px-1 font-mono">DRAIN</span>
             )}
+            {telemetry.patternStatus === 'RETURN_TIMEOUT_FAULT' && (
+              <span className="text-[9px] bg-rose-950/80 text-rose-400 border border-rose-800/60 rounded px-1 font-mono animate-pulse" title="Water Return Timeout: EC probe has been dry for > 35 mins.">TIMEOUT</span>
+            )}
           </div>
           <span className={`text-xl font-bold ${getEcColor()}`}>{telemetry.ec}</span>
         </div>
