@@ -3,7 +3,7 @@
 > **Complete Onboarding & Reference Guide for Incoming Developers**  
 > **Last Updated:** September 2026  
 > **Repository:** `CyberShadowSensei/hydroagrix-ai-dosing-controller`  
-> **System Status:** Production Ready & Verified (242 Automated Tests Passing: 211 Backend Pytest + 31 Frontend Vitest)
+> **System Status:** Production Ready & Verified (258 Automated Tests Passing: 227 Backend Pytest + 31 Frontend Vitest)
 
 
 ---
@@ -297,6 +297,15 @@ The system calculates fluid inventory for all 4 dosing bottles (`SolutionTanks`)
 - Every 24 hours, `plant_monitor_thread` captures a frame from the USB camera.
 - Computes the green leaf pixel ratio using the YOLO stage classifier or HSV color space fallback.
 - The detected stage is saved to the database and broadcasted as informational metadata (`ml_info` / `ml_stage`) over Socket.IO, while the scheduled grow cycle timeline retains strict precedence for active dosing limits.
+
+### 6.3 Hardware Fault Detection & 1-Touch Farmer UX (`backend/dosing.py` & `routes.py`)
+- **Zero-Movement Detection**: If a pump runs but the sensor shows zero or negative response over 2 consecutive cycles (`HW_FAULT_THRESHOLD = 2`), the system autonomously concludes a physical hardware issue exists (empty tank, kinked hose, airlock, or worn pump head).
+- **Auto-Suspension**: Dosing for that pump is suspended for 4 hours (`HW_FAULT_SUSPEND_HOURS = 4`) to prevent solution waste or motor dry-running.
+- **Farmer UX & 1-Touch Reset**:
+  - **No CLI Needed**: End users (farmers) never interact with terminal commands or backend scripts.
+  - **Touchscreen & UI Integration**: Real-time `fault_status` structure is broadcasted via Socket.IO telemetry and `/pump/status`.
+  - **One-Tap Reset**: Triggering any manual pump run, tapping **[ Prime Pumps ]** on the dashboard, or calling `POST /api/dosing/reset_faults` calls `reset_hw_fault()`, which immediately resets `failures=0` and un-suspends automated dosing.
+  - **Automatic Self-Healing**: Once a pump runs and the sensor detects expected movement ($\Delta \text{pH} > 0$ or $\Delta \text{EC} > 0$), `_record_hw_success()` automatically clears the fault counter and logs `HARDWARE_FAULT_RESOLVED`.
 
 ### 6.3 Periodic Interval Circulation Auto-Detection & Smart Context Alerts (`backend/sensors.py`)
 In circulating / flood-and-drain hydroponic setups, water periodically rotates into crop channels (e.g., 20 mins drain, 10 mins return), leaving the reservoir EC probe temporarily exposed to air (reading 0.3–0.5 mS/cm).
